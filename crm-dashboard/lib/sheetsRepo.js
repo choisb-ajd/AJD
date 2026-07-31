@@ -1199,6 +1199,10 @@ async function syncManagerSheetsIntoAdmin() {
           Object.assign(adminRow.values, diff);
         }
       } else if (!seenPhones.has(phone)) {
+        // 앱에서 방금 추가된 행은 admin 시트 읽기 시점에 아직 반영 안 됐을 수 있음
+        // → 중복 append 방지
+        const appCreate = appRecentlyUpdated.get(phone);
+        if (appCreate && Date.now() - appCreate < MANAGER_SYNC_INTERVAL_MS) continue;
         seenPhones.add(phone);
         const fields = { ...mgrRow.values };
         if (!fields.manager) fields.manager = manager.name;
@@ -1481,6 +1485,10 @@ async function createMemberRecord(fields) {
   if (dup) {
     throw new Error('이미 등록된 연락처입니다.');
   }
+
+  // 백그라운드 sync와의 레이스 컨디션 방지:
+  // append 전에 미리 등록해 둬야 sync가 매니저시트에서 같은 번호를 발견해도 중복 추가하지 않음
+  appRecentlyUpdated.set(targetPhone, Date.now());
 
   await appendRowToSheet(ADMIN_SPREADSHEET_ID, admin.sheetTitle, admin.columnMap, fields);
 
