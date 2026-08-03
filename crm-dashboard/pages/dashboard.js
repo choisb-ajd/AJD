@@ -71,7 +71,8 @@ const FIELD_META = {
   appJoinDate: { label: 'App가입일자', type: 'text' },
   totalContracts: { label: '누적 계약체결건수', type: 'text' },
   last60dContracts: { label: '직전 60일 계약체결건수', type: 'text' },
-  last1yTop10: { label: '직전 1년 본인 계약 건수', type: 'text' },
+  last1yContracts: { label: '직전 1년 본인 계약 건수', type: 'text' },
+  last1yTop10: { label: '직전 1년 본인 10% 횟수', type: 'text' },
   adminNote: { label: '관리자 특이사항', type: 'textarea' },
 };
 
@@ -86,6 +87,7 @@ const TABLE_COLUMNS = [
   { key: 'brand', label: '브랜드' },
   { key: 'branch', label: '지점/대리점' },
   { key: 'last60dContracts', label: '직전 60일 계약' },
+  { key: 'last1yContracts', label: '직전1년건수' },
   { key: 'contacted', label: '컨택여부' },
   { key: 'firstContactDate', label: '최초컨택일자' },
   { key: 'contactHistory', label: '컨택 히스토리' },
@@ -134,7 +136,7 @@ function csvEscape(v) {
   return s;
 }
 
-const NUMERIC_SORT_KEYS = ['totalContracts', 'last60dContracts', 'last1yTop10', 'highEfficiencyScore'];
+const NUMERIC_SORT_KEYS = ['totalContracts', 'last60dContracts', 'last1yContracts', 'last1yTop10', 'highEfficiencyScore'];
 const DATE_SORT_KEYS = ['registeredAt', 'firstContactDate', 'reContactDate', 'assignedDate', 'appJoinDate'];
 // 표/모달에서 날짜 표기를 "YYYY-MM-DD" 한 형식으로 통일해서 보여줄 칼럼들
 const DATE_DISPLAY_KEYS = ['firstContactDate', 'reContactDate', 'assignedDate', 'appJoinDate'];
@@ -163,6 +165,7 @@ const DEFAULT_COL_WIDTHS = {
   brand: 90,
   branch: 160,
   last60dContracts: 100,
+  last1yContracts: 90,
   contacted: 90,
   firstContactDate: 120,
   contactHistory: 280,
@@ -1075,6 +1078,7 @@ function DetailPanel({ row, isAdmin, saving, message, managerOptions, focusNote,
           <ReadOnlyField label="App가입일자" value={formatDateDisplay(row.appJoinDate)} />
           <ReadOnlyField label="누적 계약체결건수" value={row.totalContracts} />
           <ReadOnlyField label="직전 60일 계약건수" value={row.last60dContracts} />
+          <ReadOnlyField label="직전 1년 본인 계약건수" value={row.last1yContracts} />
         </div>
 
         {isAdmin && (

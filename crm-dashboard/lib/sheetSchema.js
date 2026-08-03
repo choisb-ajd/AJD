@@ -27,6 +27,7 @@ const FIELDS = [
   { key: 'appJoinDate', headers: ['App가입일자'] },
   { key: 'totalContracts', headers: ['누적 계약체결건수'] },
   { key: 'last60dContracts', headers: ['직전 60일 계약체결건수'] },
+  { key: 'last1yContracts', headers: ['직전 1년 본인 계약 건수'] },
   { key: 'last1yTop10', headers: ['직전 1년 본인 10% 횟수'] },
   { key: 'adminNote', headers: ['관리자 특이사항'] },
   { key: 'lastModifiedBy', headers: ['수정자'] },
@@ -50,6 +51,7 @@ const DISPLAY_COLUMNS = [
   { key: 'appJoinDate', label: 'App가입일자' },
   { key: 'totalContracts', label: '누적계약' },
   { key: 'last60dContracts', label: '직전60일' },
+  { key: 'last1yContracts', label: '직전1년건수' },
   { key: 'last1yTop10', label: '직전1년계약' },
   { key: 'assignedDate', label: '등록일자' },
   { key: 'adminNote', label: '관리자 특이사항', adminOnly: true },
@@ -84,6 +86,7 @@ const ADMIN_ONLY_EDITABLE = [
   'appJoinDate',
   'totalContracts',
   'last60dContracts',
+  'last1yContracts',
   'last1yTop10',
   'adminNote',
 ];
@@ -111,7 +114,7 @@ const MODAL_COMMON_COLLAPSIBLE = [
 const MODAL_ADMIN_COLLAPSIBLE_EXTRA = ['manager', 'adminNote', 'lastModifiedBy'];
 
 // 자동으로만 채워지는 값이라 상세/추가 모달에는 노출하지 않고 표(칼럼)에만 보여주는 항목
-const MODAL_EXCLUDED_FIELDS = ['appJoinDate', 'totalContracts', 'last60dContracts', 'last1yTop10', 'wideInsta', 'region'];
+const MODAL_EXCLUDED_FIELDS = ['appJoinDate', 'totalContracts', 'last60dContracts', 'last1yContracts', 'last1yTop10', 'wideInsta', 'region'];
 
 function buildColumnMap(headerRow) {
   const map = {};
