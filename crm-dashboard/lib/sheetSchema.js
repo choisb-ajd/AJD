@@ -51,7 +51,7 @@ const DISPLAY_COLUMNS = [
   { key: 'appJoinDate', label: 'App가입일자' },
   { key: 'totalContracts', label: '누적계약' },
   { key: 'last60dContracts', label: '직전60일' },
-  { key: 'last1yContracts', label: '직전1년건수' },
+  { key: 'last1yContracts', label: '직전1년 본인계약 건수' },
   { key: 'last1yTop10', label: '직전1년계약' },
   { key: 'assignedDate', label: '등록일자' },
   { key: 'adminNote', label: '관리자 특이사항', adminOnly: true },

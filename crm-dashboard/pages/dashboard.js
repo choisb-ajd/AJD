@@ -87,7 +87,7 @@ const TABLE_COLUMNS = [
   { key: 'brand', label: '브랜드' },
   { key: 'branch', label: '지점/대리점' },
   { key: 'last60dContracts', label: '직전 60일 계약' },
-  { key: 'last1yContracts', label: '직전1년건수' },
+  { key: 'last1yContracts', label: '직전1년 본인계약 건수' },
   { key: 'contacted', label: '컨택여부' },
   { key: 'firstContactDate', label: '최초컨택일자' },
   { key: 'contactHistory', label: '컨택 히스토리' },
