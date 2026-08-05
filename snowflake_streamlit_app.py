@@ -73,7 +73,8 @@ BAR_MAIN = "#4c78a8"
 
 MANAGER_LIST = ['김경선','김미희','박순미','송민선','신영란','이선','이선이','정혜령','최현정']
 
-USER_FILTER = "IS_ASSOCIATE = 0 AND USER_NAME NOT LIKE '%테스트%'"
+# 탈퇴회원(IS_DELETED=TRUE) 및 테스트 계정 제외
+USER_FILTER = "IS_ASSOCIATE = 0 AND USER_NAME NOT LIKE '%테스트%' AND (IS_DELETED = FALSE OR IS_DELETED IS NULL)"
 
 # CH_EXPR: cv alias 필요 (counsel_vehicle join 필수)
 CH_EXPR = """
@@ -212,6 +213,7 @@ with tab1:
             SELECT COUNT(*) AS total_dealer
             FROM AJDCAR_PROD.PUBLIC.USERS
             WHERE USER_NAME NOT LIKE '%테스트%'
+              AND (IS_DELETED = FALSE OR IS_DELETED IS NULL)
         """).collect()
         active = r[0]["ACTIVE_60"]
         total  = t[0]["TOTAL_DEALER"]
@@ -1422,21 +1424,30 @@ with tab5:
 
     @st.cache_data(ttl=300)
     def get_cmp_kpi(d_from, d_to, mgr_f):
-        # COMPARISON_ESTIMATE PK 불명확 → COUNSEL_VEHICLE_ID (FK) 로 카운트
+        # ERD 조인 체인:
+        # counsel_application → counsel_vehicle
+        #   → comparison_request_vehicle (counsel_vehicle_id)
+        #   → comparison_request (request_id)
+        #   → comparison_estimate (request_vehicle_id)
         r = session.sql(f"""
             SELECT
-                COUNT(DISTINCT ca.COUNSEL_ID) AS "전체상담건수",
+                COUNT(DISTINCT ca.COUNSEL_ID)                                            AS "전체상담건수",
+                COUNT(DISTINCT cr.REQUEST_ID)                                            AS "비견요청건수",
+                COUNT(DISTINCT ce.ESTIMATE_ID)                                           AS "비견견적건수",
                 COUNT(DISTINCT CASE WHEN ca.COUNSEL_STATUS = 'COMPARISON_COMPLETED'
-                                    THEN ca.COUNSEL_ID END) AS "비견완료건수",
+                                    THEN ca.COUNSEL_ID END)                              AS "비견완료건수",
                 COUNT(DISTINCT CASE WHEN ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
-                                    THEN ca.COUNSEL_ID END) AS "가입완료건수",
-                COUNT(DISTINCT ce.COUNSEL_VEHICLE_ID) AS "비견견적건수"
+                                    THEN ca.COUNSEL_ID END)                              AS "가입완료건수"
             FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
             LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
                 ON ca.COUNSEL_ID = cv.COUNSEL_ID
                 AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
+            LEFT JOIN AJDCAR_PROD.PUBLIC.COMPARISON_REQUEST_VEHICLE crv
+                ON cv.COUNSEL_VEHICLE_ID = crv.COUNSEL_VEHICLE_ID
+            LEFT JOIN AJDCAR_PROD.PUBLIC.COMPARISON_REQUEST cr
+                ON crv.REQUEST_ID = cr.REQUEST_ID
             LEFT JOIN AJDCAR_PROD.PUBLIC.COMPARISON_ESTIMATE ce
-                ON cv.ID = ce.COUNSEL_VEHICLE_ID
+                ON crv.REQUEST_VEHICLE_ID = ce.REQUEST_VEHICLE_ID
             LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON ca.COUNSEL_MANAGER_ID = m.ID
             WHERE ca.CREATED_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
               AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
@@ -1446,19 +1457,20 @@ with tab5:
         return r[0]
 
     ck2 = get_cmp_kpi(cmp_from, cmp_to, cmp_mgr_f)
-    total_ca  = ck2["전체상담건수"] or 0
-    cmp_done  = ck2["비견완료건수"] or 0
-    join_done = ck2["가입완료건수"] or 0
-    est_cnt   = ck2["비견견적건수"] or 0
-    cmp_rate  = (cmp_done / total_ca * 100) if total_ca else 0
-    join_rate = (join_done / cmp_done * 100) if cmp_done else 0
+    total_ca   = ck2["전체상담건수"] or 0
+    req_cnt    = ck2["비견요청건수"] or 0
+    est_cnt    = ck2["비견견적건수"] or 0
+    cmp_done   = ck2["비견완료건수"] or 0
+    join_done  = ck2["가입완료건수"] or 0
+    cmp_rate   = (cmp_done / total_ca * 100) if total_ca else 0
+    join_rate  = (join_done / cmp_done * 100) if cmp_done else 0
 
     kc1, kc2, kc3, kc4, kc5 = st.columns(5)
-    with kc1: st.markdown(kpi_card("전체 상담건수", f"{total_ca:,}건"), unsafe_allow_html=True)
-    with kc2: st.markdown(kpi_card("비견 견적건수", f"{est_cnt:,}건"), unsafe_allow_html=True)
-    with kc3: st.markdown(kpi_card("비견완료건수",  f"{cmp_done:,}건",
+    with kc1: st.markdown(kpi_card("전체 상담건수",   f"{total_ca:,}건"), unsafe_allow_html=True)
+    with kc2: st.markdown(kpi_card("비견 요청건수",   f"{req_cnt:,}건"), unsafe_allow_html=True)
+    with kc3: st.markdown(kpi_card("비견 견적건수",   f"{est_cnt:,}건"), unsafe_allow_html=True)
+    with kc4: st.markdown(kpi_card("비견완료건수",    f"{cmp_done:,}건",
                                     f"상담 대비 {cmp_rate:.1f}%"), unsafe_allow_html=True)
-    with kc4: st.markdown(kpi_card("가입완료건수",  f"{join_done:,}건"), unsafe_allow_html=True)
     with kc5: st.markdown(kpi_card("비견→가입 전환율", f"{join_rate:.1f}%",
                                     f"비견완료 {cmp_done:,}건 중"), unsafe_allow_html=True)
 
@@ -1468,9 +1480,10 @@ with tab5:
     def get_cmp_monthly(d_from, d_to, mgr_f):
         df = session.sql(f"""
             SELECT
-                TO_CHAR(ca.CREATED_AT, 'YYYY-MM') AS "월",
-                COUNT(DISTINCT ca.COUNSEL_ID)       AS "전체상담",
-                COUNT(DISTINCT ce.COUNSEL_VEHICLE_ID) AS "비견견적",
+                TO_CHAR(ca.CREATED_AT, 'YYYY-MM')       AS "월",
+                COUNT(DISTINCT ca.COUNSEL_ID)             AS "전체상담",
+                COUNT(DISTINCT cr.REQUEST_ID)             AS "비견요청",
+                COUNT(DISTINCT ce.ESTIMATE_ID)            AS "비견견적",
                 COUNT(DISTINCT CASE WHEN ca.COUNSEL_STATUS = 'COMPARISON_COMPLETED'
                                     THEN ca.COUNSEL_ID END) AS "비견완료",
                 COUNT(DISTINCT CASE WHEN ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
@@ -1479,8 +1492,12 @@ with tab5:
             LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
                 ON ca.COUNSEL_ID = cv.COUNSEL_ID
                 AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
+            LEFT JOIN AJDCAR_PROD.PUBLIC.COMPARISON_REQUEST_VEHICLE crv
+                ON cv.COUNSEL_VEHICLE_ID = crv.COUNSEL_VEHICLE_ID
+            LEFT JOIN AJDCAR_PROD.PUBLIC.COMPARISON_REQUEST cr
+                ON crv.REQUEST_ID = cr.REQUEST_ID
             LEFT JOIN AJDCAR_PROD.PUBLIC.COMPARISON_ESTIMATE ce
-                ON cv.ID = ce.COUNSEL_VEHICLE_ID
+                ON crv.REQUEST_VEHICLE_ID = ce.REQUEST_VEHICLE_ID
             LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON ca.COUNSEL_MANAGER_ID = m.ID
             WHERE ca.CREATED_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
               AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
@@ -1488,7 +1505,7 @@ with tab5:
               {mgr_f}
             GROUP BY 1 ORDER BY 1 DESC
         """).to_pandas()
-        df.columns = ["월", "전체상담", "비견견적", "비견완료", "가입완료"]
+        df.columns = ["월", "전체상담", "비견요청", "비견견적", "비견완료", "가입완료"]
         return df
 
     df_cmp_m = get_cmp_monthly(cmp_from, cmp_to, cmp_mgr_f)
@@ -1516,7 +1533,8 @@ with tab5:
             SELECT
                 COALESCE(m.NAME, '미배정') AS "담당매니저",
                 COUNT(DISTINCT ca.COUNSEL_ID)             AS "전체상담",
-                COUNT(DISTINCT ce.COUNSEL_VEHICLE_ID)      AS "비견견적",
+                COUNT(DISTINCT cr.REQUEST_ID)             AS "비견요청",
+                COUNT(DISTINCT ce.ESTIMATE_ID)            AS "비견견적",
                 COUNT(DISTINCT CASE WHEN ca.COUNSEL_STATUS = 'COMPARISON_COMPLETED'
                                     THEN ca.COUNSEL_ID END) AS "비견완료",
                 COUNT(DISTINCT CASE WHEN ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
@@ -1530,15 +1548,19 @@ with tab5:
             LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
                 ON ca.COUNSEL_ID = cv.COUNSEL_ID
                 AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
+            LEFT JOIN AJDCAR_PROD.PUBLIC.COMPARISON_REQUEST_VEHICLE crv
+                ON cv.COUNSEL_VEHICLE_ID = crv.COUNSEL_VEHICLE_ID
+            LEFT JOIN AJDCAR_PROD.PUBLIC.COMPARISON_REQUEST cr
+                ON crv.REQUEST_ID = cr.REQUEST_ID
             LEFT JOIN AJDCAR_PROD.PUBLIC.COMPARISON_ESTIMATE ce
-                ON cv.ID = ce.COUNSEL_VEHICLE_ID
+                ON crv.REQUEST_VEHICLE_ID = ce.REQUEST_VEHICLE_ID
             LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON ca.COUNSEL_MANAGER_ID = m.ID
             WHERE ca.CREATED_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
               AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
               AND (m.NAME IS NULL OR m.NAME NOT LIKE '%테스트%')
-            GROUP BY 1 ORDER BY 3 DESC
+            GROUP BY 1 ORDER BY 4 DESC
         """).to_pandas()
-        df.columns = ["담당매니저","전체상담","비견견적","비견완료","가입완료","비견완료율(%)"]
+        df.columns = ["담당매니저","전체상담","비견요청","비견견적","비견완료","가입완료","비견완료율(%)"]
         return df
 
     df_cmp_mgr = get_cmp_by_mgr(cmp_from, cmp_to)
@@ -1551,21 +1573,22 @@ with tab5:
 
     @st.cache_data(ttl=300)
     def get_cmp_vehicle(d_from, d_to, mgr_f):
-        # COMPARISON_REQUEST_VEHICLE은 COUNSEL_VEHICLE_ID로 직접 조인
         df = session.sql(f"""
             SELECT
                 TO_CHAR(ca.CREATED_AT, 'YYYY-MM')      AS "월",
                 COUNT(DISTINCT crv.COUNSEL_VEHICLE_ID)  AS "비견요청차량수",
-                COUNT(DISTINCT ce.COUNSEL_VEHICLE_ID)   AS "비견견적수",
+                COUNT(DISTINCT ce.ESTIMATE_ID)          AS "비견견적수",
                 COUNT(DISTINCT ca.COUNSEL_ID)           AS "상담건수"
             FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
             LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
                 ON ca.COUNSEL_ID = cv.COUNSEL_ID
                 AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
-            LEFT JOIN AJDCAR_PROD.PUBLIC.COMPARISON_ESTIMATE ce
-                ON cv.ID = ce.COUNSEL_VEHICLE_ID
             LEFT JOIN AJDCAR_PROD.PUBLIC.COMPARISON_REQUEST_VEHICLE crv
-                ON cv.ID = crv.COUNSEL_VEHICLE_ID
+                ON cv.COUNSEL_VEHICLE_ID = crv.COUNSEL_VEHICLE_ID
+            LEFT JOIN AJDCAR_PROD.PUBLIC.COMPARISON_REQUEST cr
+                ON crv.REQUEST_ID = cr.REQUEST_ID
+            LEFT JOIN AJDCAR_PROD.PUBLIC.COMPARISON_ESTIMATE ce
+                ON crv.REQUEST_VEHICLE_ID = ce.REQUEST_VEHICLE_ID
             LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON ca.COUNSEL_MANAGER_ID = m.ID
             WHERE ca.CREATED_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
               AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
@@ -1592,7 +1615,7 @@ with tab5:
     def get_status_log(d_from, d_to):
         df = session.sql(f"""
             SELECT
-                csl.STATUS AS "상태",
+                csl.NEW_COUNSEL_STATUS AS "상태",
                 TO_CHAR(csl.CREATED_AT, 'YYYY-MM') AS "월",
                 COUNT(*) AS "건수"
             FROM AJDCAR_PROD.PUBLIC.COUNSEL_STATUS_LOG csl
