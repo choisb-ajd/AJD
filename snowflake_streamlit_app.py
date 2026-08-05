@@ -1764,13 +1764,18 @@ with tab5:
     except Exception as e:
         st.warning(f"상태 이력 조회 오류 (테이블 스키마 확인 필요): {e}")
 
+
 # ═══════════════════════════════════════════════════════════════
-# TAB 6 — 주요지표분석 (CSV 기반 정적 데이터)
+# TAB 6 — 주요지표분석
+# ✅ Snowflake 연동: 매니저별 가입수, 월별 원수보험료, 가동딜러수, 딜러앱등록비중
+# ❌ 정적 데이터 유지: 사전예약현황, 광고비, 오프팀·B2B, 브랜드별, 본인계약, 연령별
+#    (해당 데이터는 Snowflake 스키마에 관련 테이블/컬럼 없음)
 # ═══════════════════════════════════════════════════════════════
 with tab6:
 
-    # ── 1. 사전예약 딜러확보 현황 ───────────────────────────────
+    # ── 1. 사전예약 딜러확보 현황 (정적 — 사전예약 테이블 없음) ─
     st.markdown('<div class="section-title">사전예약 딜러확보 현황</div>', unsafe_allow_html=True)
+    st.caption("ℹ️ Snowflake에 사전예약 테이블 없음 — 스프레드시트 기준 정적 데이터")
     df_reserve = pd.DataFrame({
         "사전예약일자": ["2025-8월", "2025-7월", "2025-6월", "총계"],
         "G1(수입)": [5, 162, 183, 627],
@@ -1781,8 +1786,7 @@ with tab6:
         "총계": [30, 345, 197, 1319],
     })
     st.dataframe(df_reserve, use_container_width=True, hide_index=True)
-
-    col_r1, col_r2 = st.columns(2)
+    col_r1, _ = st.columns(2)
     with col_r1:
         df_reserve_summary = pd.DataFrame({
             "구분": ["사전예약", "App가입"],
@@ -1793,19 +1797,49 @@ with tab6:
         })
         st.dataframe(df_reserve_summary, use_container_width=True, hide_index=True)
 
-    # ── 2. 매니저별 App가입 회원수 ─────────────────────────────
+    # ── 2. 매니저별 App가입 회원수 ✅ Snowflake ────────────────
     st.markdown('<div class="section-title">매니저별 App가입 회원수</div>', unsafe_allow_html=True)
-    df_mgr_join = pd.DataFrame({
-        "담당매니저": ["김경선","김미희","박순미","서지원","송민선","신영란","이선","이선이","이윤희","정혜령","조예나","진서연","최현정","총계"],
-        "가입수": [56, 188, 73, 2, 165, 249, 267, 62, 6, 84, 87, 39, 361, 1643],
-    })
-    st.dataframe(df_mgr_join, use_container_width=True, hide_index=True)
 
-    # ── 3. 광고비 출금액 ────────────────────────────────────────
+    @st.cache_data(ttl=300)
+    def get_t6_mgr_users():
+        df = session.sql(f"""
+            SELECT COALESCE(m.NAME, '미배정') AS "담당매니저",
+                   COUNT(*) AS "가입수"
+            FROM AJDCAR_PROD.PUBLIC.USERS u
+            LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON u.MANAGER_ID = m.ID
+            WHERE u.USER_NAME NOT LIKE '%테스트%'
+              AND (u.IS_DELETED = FALSE OR u.IS_DELETED IS NULL)
+              AND u.IS_ASSOCIATE = 0
+            GROUP BY 1 ORDER BY 2 DESC
+        """).to_pandas()
+        df.columns = ["담당매니저", "가입수"]
+        return df
+
+    try:
+        df_mgr_join = get_t6_mgr_users()
+        mg1, mg2 = st.columns([1, 2])
+        with mg1:
+            st.dataframe(df_mgr_join, use_container_width=True, hide_index=True)
+        with mg2:
+            if not df_mgr_join.empty:
+                st.altair_chart(apply_theme(
+                    alt.Chart(df_mgr_join).mark_bar(color=BAR_MAIN).encode(
+                        y=alt.Y("담당매니저:N", sort="-x", title=None),
+                        x=alt.X("가입수:Q", title="가입수"),
+                        tooltip=[alt.Tooltip("담당매니저:N"), alt.Tooltip("가입수:Q", format=",")]
+                    ).properties(height=280, background=CHART_BG)
+                ), use_container_width=True)
+    except Exception as e:
+        st.warning(f"매니저별 가입수 조회 오류: {e}")
+
+    # ── 3. 광고비 출금액 (정적 — 광고비 테이블 없음) ───────────
     st.markdown('<div class="section-title">광고비 출금액 (월별)</div>', unsafe_allow_html=True)
+    st.caption("ℹ️ Snowflake에 광고비 출금 테이블 없음 — 스프레드시트 기준 정적 데이터")
     df_adcost = pd.DataFrame({
-        "월": ["2026-8월","2026-7월","2026-6월","2026-5월","2026-4월","2026-3월","2026-2월","2026-1월","2025-12월","2025-11월","2025-10월","2025-9월","2025-8월","총계"],
-        "출금요청액(원)": [3447070,54159510,46994870,42966100,46786770,43856860,31771990,39480770,28650160,25356990,24131030,19551440,8230000,415383560],
+        "월": ["2026-8월","2026-7월","2026-6월","2026-5월","2026-4월","2026-3월","2026-2월","2026-1월",
+               "2025-12월","2025-11월","2025-10월","2025-9월","2025-8월","총계"],
+        "출금요청액(원)": [3447070,54159510,46994870,42966100,46786770,43856860,31771990,39480770,
+                         28650160,25356990,24131030,19551440,8230000,415383560],
         "비율": ["4.10%","5.64%","4.66%","5.27%","5.56%","5.07%","4.71%","6.50%","-","-","-","-","-","-"],
     })
     col_a1, col_a2 = st.columns([2, 3])
@@ -1813,50 +1847,79 @@ with tab6:
         st.dataframe(df_adcost, use_container_width=True, hide_index=True)
     with col_a2:
         chart_ad = df_adcost[df_adcost["월"] != "총계"].copy()
-        chart_ad = chart_ad[chart_ad["출금요청액(원)"] < 200000000]
-        bar_ad = alt.Chart(chart_ad).mark_bar().encode(
-            x=alt.X("월:N", sort=None, title="월"),
-            y=alt.Y("출금요청액(원):Q", title="출금액(원)"),
-            tooltip=["월","출금요청액(원)","비율"],
+        bar_ad = alt.Chart(chart_ad).mark_bar(color=BAR_MAIN).encode(
+            x=alt.X("월:N", sort=None, title="월", axis=alt.Axis(labelAngle=-45)),
+            y=alt.Y("출금요청액(원):Q", title="출금액(원)", axis=alt.Axis(format=",.0f")),
+            tooltip=["월", alt.Tooltip("출금요청액(원):Q", format=",.0f"), "비율"],
         ).properties(height=280, title="월별 광고비 출금액")
-        st.altair_chart(bar_ad, use_container_width=True)
+        st.altair_chart(apply_theme(bar_ad.properties(background=CHART_BG)), use_container_width=True)
 
-    # ── 4. 월별 원수보험료 ──────────────────────────────────────
+    # ── 4. 월별 원수보험료 ✅ Snowflake ────────────────────────
     st.markdown('<div class="section-title">월별 원수보험료</div>', unsafe_allow_html=True)
-    df_premium = pd.DataFrame({
-        "체결월": ["26-08m","26-07m","26-06m","26-05m","26-04m","26-03m","26-02m","26-01m","25-12m","25-11m","25-10m","25-09m","25-08m","25-07m","25-06m","25-05m","25-04m","25-03m","25-02m"],
-        "원수보험료(원)": [84145470,960536960,1007941790,814967950,841056080,865764980,674172880,607503560,634796070,499521330,400728170,465547600,398429530,268445590,83555830,25707150,13377360,14521340,519180],
-        "수수료(원)": [9256002,105659066,110873597,89646475,92516169,95234148,74159017,66825392,69827568,54947346,44080099,51210236,43827248,29529015,9191141,2827787,1471510,1597347,None],
-    })
-    col_p1, col_p2 = st.columns([2, 3])
-    with col_p1:
-        st.dataframe(df_premium, use_container_width=True, hide_index=True)
-    with col_p2:
-        chart_pr = df_premium[df_premium["체결월"] != "25-02m"].copy()
-        bar_pr = alt.Chart(chart_pr).mark_bar().encode(
-            x=alt.X("체결월:N", sort=None, title="체결월"),
-            y=alt.Y("원수보험료(원):Q", title="원수보험료(원)"),
-            tooltip=["체결월","원수보험료(원)","수수료(원)"],
-        ).properties(height=280, title="월별 원수보험료")
-        st.altair_chart(bar_pr, use_container_width=True)
 
-    # ── 5. 오프팀·B2B 활동회원 비율 ────────────────────────────
+    @st.cache_data(ttl=300)
+    def get_t6_monthly_premium():
+        df = session.sql("""
+            SELECT
+                TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM') AS "체결월",
+                SUM(cv.CONTRACT_AMOUNT)                   AS "원수보험료(원)"
+            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
+            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
+                ON ca.COUNSEL_ID = cv.COUNSEL_ID
+                AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
+            WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
+              AND ca.JOIN_COMPLETED_AT IS NOT NULL
+              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
+            GROUP BY 1 ORDER BY 1 DESC
+            LIMIT 24
+        """).to_pandas()
+        df.columns = ["체결월", "원수보험료(원)"]
+        return df
+
+    try:
+        df_premium = get_t6_monthly_premium()
+        col_p1, col_p2 = st.columns([2, 3])
+        with col_p1:
+            st.dataframe(df_premium, use_container_width=True, hide_index=True)
+        with col_p2:
+            if not df_premium.empty:
+                order_pr = list(df_premium["체결월"])
+                bar_pr = alt.Chart(df_premium).mark_bar(color=BAR_MAIN).encode(
+                    x=alt.X("체결월:N", sort=order_pr, title="체결월",
+                            axis=alt.Axis(labelAngle=-45)),
+                    y=alt.Y("원수보험료(원):Q", title="원수보험료(원)",
+                            axis=alt.Axis(format=",.0f")),
+                    tooltip=["체결월", alt.Tooltip("원수보험료(원):Q", format=",.0f")],
+                ).properties(height=280, title="월별 원수보험료")
+                st.altair_chart(apply_theme(bar_pr.properties(background=CHART_BG)),
+                                use_container_width=True)
+    except Exception as e:
+        st.warning(f"월별 원수보험료 조회 오류: {e}")
+
+    # ── 5. 오프팀·B2B 활동회원 비율 (정적 — 세부채널 컬럼 없음) ─
     st.markdown('<div class="section-title">오프팀·B2B 활동회원 비율</div>', unsafe_allow_html=True)
+    st.caption("ℹ️ 오프팀/B2B 세부 채널 분류 컬럼이 Snowflake에 없음 — 스프레드시트 기준 정적 데이터")
     df_offb2b = pd.DataFrame({
-        "인입채널": ["오프팀","오프팀(별도영업)","오프팀(상조-종료)","오프팀(상조)","오프팀(후속)","B2B(겟차)","B2B(예상훈)","B2B(차사)","B2B(RS컴퍼니)","P_맥모닝","총계"],
+        "인입채널": ["오프팀","오프팀(별도영업)","오프팀(상조-종료)","오프팀(상조)","오프팀(후속)",
+                    "B2B(겟차)","B2B(예상훈)","B2B(차사)","B2B(RS컴퍼니)","P_맥모닝","총계"],
         "앱가입(명)": [187,17,33,78,62,32,1,9,10,20,1643],
-        "활동(60일)": [32,1,16,24,29,21,"-",4,"-",10,626],
-        "활동(90일)": [41,1,17,26,34,25,"-",5,1,13,749],
-        "체결수(90일)": [134,10,69,118,96,98,"-",50,1,39,2566],
+        "활동(60일)": ["32","1","16","24","29","21","-","4","-","10","626"],
+        "활동(90일)": ["41","1","17","26","34","25","-","5","1","13","749"],
+        "체결수(90일)": ["134","10","69","118","96","98","-","50","1","39","2566"],
         "활동률": ["17%","6%","48%","31%","47%","66%","0%","44%","0%","50%","-"],
     })
     st.dataframe(df_offb2b, use_container_width=True, hide_index=True)
 
-    # ── 6. 딜러 브랜드별 앱가입·활동·계약 분포 ─────────────────
-    st.markdown('<div class="section-title">딜러 브랜드별 앱가입·활동회원·계약건수 분포</div>', unsafe_allow_html=True)
+    # ── 6. 딜러 브랜드별 분포 (정적 — 브랜드 컬럼 없음) ────────
+    st.markdown('<div class="section-title">딜러 브랜드별 앱가입·활동회원·계약건수 분포</div>',
+                unsafe_allow_html=True)
+    st.caption("ℹ️ 브랜드(현대/기아 등) 컬럼이 USERS 테이블에 없음 — 스프레드시트 기준 정적 데이터")
     df_brand = pd.DataFrame({
-        "G속성": ["G2","G2","G2","G2","G2","G2","G2소계","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1소계","전체합계"],
-        "브랜드": ["현대","기아","르노","KGM","쉐보레","-","G2(국산)","BMW","벤츠","볼보","BYD","렉서스","아우디","폭스바겐","포드,링컨","지프","MINI","토요타","혼다","캐딜락","포르쉐","푸조","폴스타","재규어","랜드로버","G1(수입)","총계"],
+        "G속성": ["G2","G2","G2","G2","G2","G2","G2소계",
+                  "G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1소계","전체합계"],
+        "브랜드": ["현대","기아","르노","KGM","쉐보레","-","G2(국산)",
+                  "BMW","벤츠","볼보","BYD","렉서스","아우디","폭스바겐","포드,링컨","지프","MINI",
+                  "토요타","혼다","캐딜락","포르쉐","푸조","폴스타","재규어","랜드로버","G1(수입)","총계"],
         "앱가입(명)": [310,210,77,30,21,1,649,127,127,95,67,45,42,19,19,13,11,11,8,8,7,4,1,1,1,606,1255],
         "활동(60일)": [102,86,20,5,10,1,224,55,48,35,38,18,14,8,5,7,8,3,6,4,6,1,1,None,None,257,481],
         "활동(90일)": [130,102,28,7,10,1,278,61,55,41,39,22,22,9,5,9,8,3,7,5,6,2,1,None,None,295,573],
@@ -1865,59 +1928,131 @@ with tab6:
     })
     st.dataframe(df_brand, use_container_width=True, hide_index=True)
 
-    # ── 7. 가동 딜러수 (월별·G속성별) ──────────────────────────
+    # ── 7. 가동 딜러수 (월별·G속성별) ✅ Snowflake ─────────────
     st.markdown('<div class="section-title">가동 딜러수 (월별·G속성별)</div>', unsafe_allow_html=True)
-    df_active_dealer = pd.DataFrame({
-        "체결월": ["26-08m","26-07m","26-06m","26-05m","26-04m","26-03m","26-02m","26-01m","25-12m","25-11m","25-10m","25-09m","25-08m","25-07m","25-06m"],
-        "G1(수입)": [23,176,198,161,150,182,165,146,164,139,133,133,103,96,35],
-        "G2(국산)": [34,163,176,145,161,144,100,97,90,80,58,67,71,38,3],
-        "G3(중고차)": [1,7,8,6,4,5,5,4,3,4,4,3,4,5,None],
-        "G4(보험설계)": [6,67,57,58,67,56,56,52,47,43,38,39,35,13,None],
-        "G5(에이전시)": [6,29,31,31,34,31,30,26,21,10,6,6,3,2,1],
-        "총계": [70,442,470,401,416,418,356,325,325,276,239,248,216,154,39],
-    })
-    col_d1, col_d2 = st.columns([2, 3])
-    with col_d1:
-        st.dataframe(df_active_dealer, use_container_width=True, hide_index=True)
-    with col_d2:
-        df_melt = df_active_dealer[df_active_dealer["체결월"] != "26-08m"].melt(
-            id_vars=["체결월"], value_vars=["G1(수입)","G2(국산)","G3(중고차)","G4(보험설계)","G5(에이전시)"],
-            var_name="G속성", value_name="가동딜러수"
-        ).dropna()
-        chart_dl = alt.Chart(df_melt).mark_line(point=True).encode(
-            x=alt.X("체결월:N", sort=None, title="체결월"),
-            y=alt.Y("가동딜러수:Q", title="가동딜러수"),
-            color="G속성:N",
-            tooltip=["체결월","G속성","가동딜러수"],
-        ).properties(height=280, title="월별 G속성별 가동딜러수")
-        st.altair_chart(chart_dl, use_container_width=True)
 
-    # ── 8. 계약체결건 중 딜러앱 등록 체결건 비중 ───────────────
-    st.markdown('<div class="section-title">계약체결건 중 딜러앱 등록 체결건 비중</div>', unsafe_allow_html=True)
-    df_app_ratio = pd.DataFrame({
-        "체결월": ["26-08m","26-07m","26-06m","26-05m","26-04m","26-03m","26-02m","26-01m","25-12m","25-11m","25-10m","25-09m","25-08m","25-07m","25-06m","총계"],
-        "딜러앱미등록": [1,10,25,18,30,27,25,9,17,15,16,21,83,220,47,564],
-        "준등록(준)": [None,6,None,None,None,None,None,None,None,None,None,None,None,None,None,6],
-        "딜러앱등록(Y)": [80,859,941,756,788,777,606,510,520,440,345,381,240,None,None,7243],
-        "총체결건": [81,875,966,774,818,804,631,519,537,455,361,402,323,220,47,7813],
-        "앱등록비중": ["98.77%","98.17%","97.41%","97.67%","96.33%","96.64%","96.04%","98.27%","96.83%","96.70%","95.57%","94.78%","74.30%","0.00%","0.00%","-"],
-    })
-    st.dataframe(df_app_ratio, use_container_width=True, hide_index=True)
+    @st.cache_data(ttl=300)
+    def get_t6_active_dealer_g():
+        df = session.sql(f"""
+            SELECT
+                TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM') AS "체결월",
+                {G_ATTR_EXPR}                             AS "G속성",
+                COUNT(DISTINCT ca.USER_ID)                AS "가동딜러수"
+            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
+            LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u ON ca.USER_ID = u.ID
+            WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
+              AND ca.JOIN_COMPLETED_AT IS NOT NULL
+              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
+              AND u.USER_NAME NOT LIKE '%테스트%'
+            GROUP BY 1, 2
+            ORDER BY 1 DESC
+            LIMIT 300
+        """).to_pandas()
+        df.columns = ["체결월", "G속성", "가동딜러수"]
+        return df
 
-    # ── 9. 계약체결건 중 본인계약 비중 ─────────────────────────
-    st.markdown('<div class="section-title">계약체결건 중 딜러 본인계약 비중</div>', unsafe_allow_html=True)
+    try:
+        df_adg = get_t6_active_dealer_g()
+        if not df_adg.empty:
+            G5_LIST = ["G1(수입)", "G2(국산)", "G3(중고차)", "G4(보험설계)", "G5(에이전시)"]
+            df_adg_filt = df_adg[df_adg["G속성"].isin(G5_LIST)]
+            pivot_adg = df_adg_filt.pivot_table(
+                index="체결월", columns="G속성", values="가동딜러수",
+                aggfunc="sum", fill_value=0
+            ).reset_index()
+            pivot_adg["총계"] = pivot_adg[[c for c in G5_LIST if c in pivot_adg.columns]].sum(axis=1)
+            pivot_adg = pivot_adg.sort_values("체결월", ascending=False).reset_index(drop=True)
+            col_d1, col_d2 = st.columns([2, 3])
+            with col_d1:
+                st.dataframe(pivot_adg, use_container_width=True, hide_index=True)
+            with col_d2:
+                df_melt_adg = df_adg_filt[df_adg_filt["G속성"].isin(G5_LIST)].copy()
+                order_adg = sorted(df_melt_adg["체결월"].unique(), reverse=True)
+                chart_dl = alt.Chart(df_melt_adg).mark_line(point=True).encode(
+                    x=alt.X("체결월:N", sort=order_adg, title="체결월",
+                            axis=alt.Axis(labelAngle=-45)),
+                    y=alt.Y("가동딜러수:Q", title="가동딜러수"),
+                    color=alt.Color("G속성:N", legend=alt.Legend(title="G속성")),
+                    tooltip=["체결월", "G속성",
+                             alt.Tooltip("가동딜러수:Q", format=",")],
+                ).properties(height=280, title="월별 G속성별 가동딜러수")
+                st.altair_chart(apply_theme(chart_dl.properties(background=CHART_BG)),
+                                use_container_width=True)
+        else:
+            st.info("데이터 없음")
+    except Exception as e:
+        st.warning(f"가동딜러수 조회 오류: {e}")
+
+    # ── 8. 딜러앱 등록 체결건 비중 ✅ Snowflake (CHANNEL_PATH 기준) ─
+    st.markdown('<div class="section-title">계약체결건 중 딜러앱 등록 체결건 비중</div>',
+                unsafe_allow_html=True)
+    st.caption("ℹ️ COUNSEL_APPLICATION.CHANNEL_PATH = 'DEALER_APP' 기준으로 산출")
+
+    @st.cache_data(ttl=300)
+    def get_t6_app_ratio():
+        df = session.sql("""
+            SELECT
+                TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM') AS "체결월",
+                SUM(CASE WHEN ca.CHANNEL_PATH = 'DEALER_APP' THEN 1 ELSE 0 END)     AS "딜러앱등록",
+                SUM(CASE WHEN COALESCE(ca.CHANNEL_PATH,'') != 'DEALER_APP' THEN 1 ELSE 0 END) AS "미등록",
+                COUNT(*)                                                              AS "총체결건",
+                ROUND(
+                    SUM(CASE WHEN ca.CHANNEL_PATH = 'DEALER_APP' THEN 1 ELSE 0 END)
+                    / NULLIF(COUNT(*), 0) * 100, 2
+                ) AS "앱등록비중(%)"
+            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
+            WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
+              AND ca.JOIN_COMPLETED_AT IS NOT NULL
+              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
+            GROUP BY 1 ORDER BY 1 DESC
+            LIMIT 24
+        """).to_pandas()
+        df.columns = ["체결월", "딜러앱등록", "미등록", "총체결건", "앱등록비중(%)"]
+        return df
+
+    try:
+        df_app_r = get_t6_app_ratio()
+        if not df_app_r.empty:
+            ar1, ar2 = st.columns([2, 3])
+            with ar1:
+                st.dataframe(df_app_r, use_container_width=True, hide_index=True)
+            with ar2:
+                order_ar = list(df_app_r["체결월"])
+                df_ar_melt = df_app_r[["체결월","딜러앱등록","미등록"]].melt(
+                    "체결월", var_name="구분", value_name="건수"
+                )
+                chart_ar = alt.Chart(df_ar_melt).mark_bar().encode(
+                    x=alt.X("체결월:N", sort=order_ar, title="체결월",
+                            axis=alt.Axis(labelAngle=-45)),
+                    y=alt.Y("건수:Q", title="체결건수"),
+                    color=alt.Color("구분:N", legend=alt.Legend(title="구분")),
+                    tooltip=["체결월", "구분", alt.Tooltip("건수:Q", format=",")]
+                ).properties(height=280, title="딜러앱 등록 vs 미등록 체결건")
+                st.altair_chart(apply_theme(chart_ar.properties(background=CHART_BG)),
+                                use_container_width=True)
+        else:
+            st.info("데이터 없음")
+    except Exception as e:
+        st.warning(f"딜러앱 등록 비중 조회 오류: {e}")
+
+    # ── 9. 본인계약 비중 (정적 — 본인혜택 컬럼 불명확) ─────────
+    st.markdown('<div class="section-title">계약체결건 중 딜러 본인계약 비중</div>',
+                unsafe_allow_html=True)
+    st.caption("ℹ️ 본인혜택(본인계약) 여부 컬럼이 Snowflake 스키마에서 확인되지 않음 — 정적 데이터")
     df_self_ratio = pd.DataFrame({
-        "체결월": ["26-08m","26-07m","26-06m","26-05m","26-04m","26-03m","26-02m","26-01m","25-12m","25-11m","25-10m","25-09m","25-08m","25-07m","25-06m","총계"],
+        "체결월": ["26-08m","26-07m","26-06m","26-05m","26-04m","26-03m","26-02m","26-01m",
+                  "25-12m","25-11m","25-10m","25-09m","25-08m","25-07m","25-06m","총계"],
         "총체결건": [65,811,931,767,820,856,671,632,686,557,426,486,374,254,55,8391],
-        "원수보험료(원)": [61103150,838806170,906696740,769183220,790611010,825597740,648388250,586643020,610305460,485807070,386966830,436009100,367831320,237425730,59087720,8010462530],
         "본인혜택체결건": [5,45,60,52,61,59,38,35,37,43,49,33,36,5,0,558],
         "비본인체결건": [60,766,871,715,759,797,633,597,649,514,377,453,338,249,55,7833],
         "본인계약률": ["7.69%","5.55%","6.44%","6.78%","7.44%","6.89%","5.66%","-","-","-","-","-","-","-","-","-"],
     })
     st.dataframe(df_self_ratio, use_container_width=True, hide_index=True)
 
-    # ── 10. 딜러그룹 및 연령별 분포·생산성 ─────────────────────
-    st.markdown('<div class="section-title">딜러그룹 및 연령별 분포·생산성</div>', unsafe_allow_html=True)
+    # ── 10. 딜러그룹 및 연령별 분포·생산성 (정적 — 연령 컬럼 없음) ─
+    st.markdown('<div class="section-title">딜러그룹 및 연령별 분포·생산성</div>',
+                unsafe_allow_html=True)
+    st.caption("ℹ️ USERS 테이블에 연령대 컬럼 없음 — 스프레드시트 기준 정적 데이터")
     df_age = pd.DataFrame({
         "G속성": ["G1(수입)","G1(수입)","G1(수입)","G1(수입)","G1(수입) 소계",
                   "G2(국산)","G2(국산)","G2(국산)","G2(국산)","G2(국산)","G2(국산) 소계",
@@ -1930,7 +2065,9 @@ with tab6:
                    "20대","30대","40대","50대","60대 이상","합계",
                    "20대","30대","40대","50대","60대 이상","합계"],
         "딜러수": [21,117,83,16,237, 15,54,71,44,21,205, 1,3,3,7, 8,27,32,19,3,89, 3,14,15,4,1,37],
-        "직전60일 생산성": [4.48,3.17,2.95,2.06,3.14, 2.27,3.63,2.65,2.80,1.90,2.83, 2.00,1.00,2.33,1.71, 1.88,2.07,2.28,2.11,1.67,2.12, 2.00,2.14,4.20,2.50,2.00,3.0],
+        "직전60일 생산성": [4.48,3.17,2.95,2.06,3.14, 2.27,3.63,2.65,2.80,1.90,2.83,
+                           2.00,1.00,2.33,1.71, 1.88,2.07,2.28,2.11,1.67,2.12,
+                           2.00,2.14,4.20,2.50,2.00,3.0],
     })
     col_age1, col_age2 = st.columns([2, 3])
     with col_age1:
@@ -1940,8 +2077,10 @@ with tab6:
         chart_age = alt.Chart(df_age_detail).mark_bar().encode(
             x=alt.X("G속성:N", title="G속성"),
             y=alt.Y("딜러수:Q", title="딜러수"),
-            color=alt.Color("연령대:N"),
-            tooltip=["G속성","연령대","딜러수","직전60일 생산성"],
+            color=alt.Color("연령대:N", legend=alt.Legend(title="연령대")),
+            tooltip=["G속성","연령대",
+                     alt.Tooltip("딜러수:Q", format=","),
+                     alt.Tooltip("직전60일 생산성:Q")],
         ).properties(height=280, title="G속성·연령대별 딜러 분포")
-        st.altair_chart(chart_age, use_container_width=True)
-
+        st.altair_chart(apply_theme(chart_age.properties(background=CHART_BG)),
+                        use_container_width=True)
