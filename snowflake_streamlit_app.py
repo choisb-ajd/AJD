@@ -14,33 +14,6 @@ st.markdown("""
 [data-testid="stSidebar"]          { background: #f8f9fa; }
 [data-testid="stHeader"]           { background: #ffffff; }
 
-/* ── 탭바 고정 (스크롤해도 상단 고정) ── */
-div[data-testid="stTabs"] div[role="tablist"] {
-    position: fixed !important;
-    top: 0px !important;
-    left: 0px !important;
-    right: 0px !important;
-    z-index: 9999 !important;
-    background-color: #ffffff !important;
-    padding: 6px 2rem 4px !important;
-    border-bottom: 2px solid #e0e0e0 !important;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.10) !important;
-    display: flex !important;
-    flex-direction: row !important;
-    align-items: center !important;
-    min-height: 44px !important;
-}
-
-/* 탭 버튼 텍스트 강제 표시 */
-div[data-testid="stTabs"] div[role="tablist"] button,
-div[data-testid="stTabs"] div[role="tablist"] [role="tab"] {
-    color: #333333 !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    display: inline-flex !important;
-    align-items: center !important;
-}
-
 /* 탭바 높이만큼 콘텐츠 밀어내기 */
 div[data-testid="stTabs"] > div:nth-child(2) {
     margin-top: 56px !important;
@@ -174,6 +147,42 @@ same_period_end  = min(last_month_end,
                        last_month_start.replace(day=min(today.day, last_month_end.day)))
 
 # ════════════════════════════════════
+# ── 탭바 고정 JS 주입 ─────────────────────────────────────────────
+st.markdown("""
+<div id="tab-sticky-anchor"></div>
+<script>
+(function() {
+    function applySticky() {
+        var tl = document.querySelector('div[data-testid="stTabs"] div[role="tablist"]');
+        if (!tl) return false;
+        tl.style.setProperty('position','fixed','important');
+        tl.style.setProperty('top','0','important');
+        tl.style.setProperty('left','0','important');
+        tl.style.setProperty('right','0','important');
+        tl.style.setProperty('z-index','9999','important');
+        tl.style.setProperty('background-color','#ffffff','important');
+        tl.style.setProperty('padding','6px 2rem 4px','important');
+        tl.style.setProperty('border-bottom','2px solid #e0e0e0','important');
+        tl.style.setProperty('box-shadow','0 2px 6px rgba(0,0,0,0.10)','important');
+        tl.style.setProperty('display','flex','important');
+        tl.style.setProperty('flex-direction','row','important');
+        tl.style.setProperty('align-items','center','important');
+        tl.style.setProperty('min-height','44px','important');
+        Array.from(tl.querySelectorAll('button, [role="tab"], p, span')).forEach(function(el){
+            el.style.setProperty('color','#333333','important');
+            el.style.setProperty('visibility','visible','important');
+            el.style.setProperty('opacity','1','important');
+        });
+        return true;
+    }
+    var tries = 0;
+    var iv = setInterval(function(){
+        if (applySticky() || ++tries > 30) clearInterval(iv);
+    }, 300);
+})();
+</script>
+""", unsafe_allow_html=True)
+
 # 탭 구성
 # ════════════════════════════════════
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
