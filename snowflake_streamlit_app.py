@@ -631,7 +631,6 @@ with tab1:
                 TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM') AS "월",
                 COALESCE(ca.JOIN_INSURER_CODE, '미분류') AS "보험사",
                 {CH_EXPR} AS "채널",
-                COUNT(*) AS "건수",
                 SUM(cv.CONTRACT_AMOUNT) AS "원수보험료"
             FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
             LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
@@ -643,61 +642,22 @@ with tab1:
               AND ca.JOIN_COMPLETED_AT >= DATEADD('MONTH', -3, DATE_TRUNC('MONTH', CURRENT_DATE))
             GROUP BY 1, 2, 3 ORDER BY 1 DESC, 2, 3
         """).to_pandas()
-        df.columns = ["월", "보험사", "채널", "건수", "원수보험료"]
+        df.columns = ["월", "보험사", "채널", "원수보험료"]
         return df
 
     df_pv = get_pivot_3m()
     if not df_pv.empty:
-        months_pv  = sorted(df_pv["월"].unique(), reverse=True)
-        channels_pv = sorted(df_pv["채널"].unique())
-        insurers_pv = sorted(df_pv["보험사"].unique())
-
-        def _build_pivot_row(sub):
-            row = {}
-            for m in months_pv:
-                mdf = sub[sub["월"] == m]
-                tc = tp = 0
-                for ch in channels_pv:
-                    cdf = mdf[mdf["채널"] == ch]
-                    c = int(cdf["건수"].sum())
-                    p = int(cdf["원수보험료"].sum())
-                    tc += c; tp += p
-                    row[(m, ch, "체결건수")] = c
-                    row[(m, ch, "보험료")]   = p
-                row[(m, "총계", "체결건수")] = tc
-                row[(m, "총계", "보험료")]   = tp
-            return row
-
-        pv_rows = []
-        for ins in insurers_pv:
-            r = _build_pivot_row(df_pv[df_pv["보험사"] == ins])
-            r["보험사"] = ins
-            pv_rows.append(r)
-        tr = _build_pivot_row(df_pv)
-        tr["보험사"] = "총 합계"
-        pv_rows.append(tr)
-
-        pv_result = pd.DataFrame(pv_rows).set_index("보험사")
-
-        col_tuples = []
-        for m in months_pv:
-            for ch in channels_pv:
-                col_tuples.append((m, ch, "체결건수"))
-                col_tuples.append((m, ch, "보험료"))
-            col_tuples.append((m, "총계", "체결건수"))
-            col_tuples.append((m, "총계", "보험료"))
-
-        pv_result = pv_result[[c for c in col_tuples if c in pv_result.columns]]
-        pv_result.columns = pd.MultiIndex.from_tuples(
-            [c for c in col_tuples if c in pv_result.columns]
-        )
-
-        for col in pv_result.columns:
-            pv_result[col] = pv_result[col].apply(
-                lambda x: f"{int(x):,}" if (x and int(x) != 0) else "-"
-            )
-
-        st.dataframe(pv_result, use_container_width=True)
+        month_cols = sorted(df_pv["월"].unique(), reverse=True)
+        pivot = df_pv.pivot_table(
+            index=["보험사", "채널"], columns="월",
+            values="원수보험료", aggfunc="sum", fill_value=0
+        ).reset_index()
+        ordered_cols = ["보험사", "채널"] + [c for c in month_cols if c in pivot.columns]
+        pivot = pivot[ordered_cols]
+        for c in month_cols:
+            if c in pivot.columns:
+                pivot[c] = pivot[c].apply(lambda x: f"{int(x):,}" if x else "-")
+        st.dataframe(pivot, use_container_width=True, hide_index=True)
     else:
         st.info("데이터 없음")
 
