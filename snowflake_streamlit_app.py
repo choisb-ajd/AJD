@@ -15,9 +15,7 @@ st.markdown("""
 [data-testid="stHeader"]           { background: #ffffff; }
 
 /* ── 탭바 고정 (스크롤해도 상단 고정) ── */
-div[data-testid="stTabs"] div[role="tablist"],
-div[data-baseweb="tab-list"],
-[data-testid="stTabsList"] {
+div[data-testid="stTabs"] div[role="tablist"] {
     position: fixed !important;
     top: 0px !important;
     left: 0px !important;
@@ -26,12 +24,26 @@ div[data-baseweb="tab-list"],
     background-color: #ffffff !important;
     padding: 6px 2rem 4px !important;
     border-bottom: 2px solid #e0e0e0 !important;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.08) !important;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.10) !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    min-height: 44px !important;
+}
+
+/* 탭 버튼 텍스트 강제 표시 */
+div[data-testid="stTabs"] div[role="tablist"] button,
+div[data-testid="stTabs"] div[role="tablist"] [role="tab"] {
+    color: #333333 !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    display: inline-flex !important;
+    align-items: center !important;
 }
 
 /* 탭바 높이만큼 콘텐츠 밀어내기 */
 div[data-testid="stTabs"] > div:nth-child(2) {
-    margin-top: 52px !important;
+    margin-top: 56px !important;
 }
 .kpi-card {
     background: #f0f2f6;
