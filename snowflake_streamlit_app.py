@@ -15,8 +15,7 @@ st.markdown("""
 [data-testid="stHeader"]           { background: #ffffff; }
 
 /* ── 탭바 고정 (스크롤해도 상단 고정) ── */
-div[data-testid="stTabs"] > div:first-child,
-div[data-testid="stTabs"] > div[role="tablist"],
+div[data-testid="stTabs"] div[role="tablist"],
 div[data-baseweb="tab-list"],
 [data-testid="stTabsList"] {
     position: sticky !important;
