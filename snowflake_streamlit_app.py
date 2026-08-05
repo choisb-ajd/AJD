@@ -18,12 +18,20 @@ st.markdown("""
 div[data-testid="stTabs"] div[role="tablist"],
 div[data-baseweb="tab-list"],
 [data-testid="stTabsList"] {
-    position: sticky !important;
+    position: fixed !important;
     top: 0px !important;
+    left: 0px !important;
+    right: 0px !important;
     z-index: 9999 !important;
     background-color: #ffffff !important;
-    padding-bottom: 4px !important;
-    border-bottom: 1px solid #e0e0e0 !important;
+    padding: 6px 2rem 4px !important;
+    border-bottom: 2px solid #e0e0e0 !important;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08) !important;
+}
+
+/* 탭바 높이만큼 콘텐츠 밀어내기 */
+div[data-testid="stTabs"] > div:nth-child(2) {
+    margin-top: 52px !important;
 }
 .kpi-card {
     background: #f0f2f6;
