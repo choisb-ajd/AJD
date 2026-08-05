@@ -15,13 +15,16 @@ st.markdown("""
 [data-testid="stHeader"]           { background: #ffffff; }
 
 /* ── 탭바 고정 (스크롤해도 상단 고정) ── */
-div[data-testid="stTabs"] > div:first-child {
-    position: sticky;
-    top: 2.875rem;
-    z-index: 999;
-    background-color: #ffffff;
-    padding-bottom: 4px;
-    border-bottom: 1px solid #e0e0e0;
+div[data-testid="stTabs"] > div:first-child,
+div[data-testid="stTabs"] > div[role="tablist"],
+div[data-baseweb="tab-list"],
+[data-testid="stTabsList"] {
+    position: sticky !important;
+    top: 0px !important;
+    z-index: 9999 !important;
+    background-color: #ffffff !important;
+    padding-bottom: 4px !important;
+    border-bottom: 1px solid #e0e0e0 !important;
 }
 .kpi-card {
     background: #f0f2f6;
@@ -285,6 +288,73 @@ with tab1:
         with col:
             st.markdown(kpi_card(g, f"{total_g:,}명",
                                  f"당월 +{month_g:,}명", "neutral"), unsafe_allow_html=True)
+
+    # ── 탈퇴회원 추이 ────────────────────────────
+    st.markdown('<div class="section-title">탈퇴회원 추이</div>', unsafe_allow_html=True)
+
+    @st.cache_data(ttl=300)
+    def get_withdrawal_trend():
+        df = session.sql("""
+            SELECT
+                TO_CHAR(UPDATED_AT, 'YYYY-MM') AS "월",
+                COUNT(*) AS "탈퇴수"
+            FROM AJDCAR_PROD.PUBLIC.USERS
+            WHERE IS_DELETED = TRUE
+              AND USER_NAME NOT LIKE '%테스트%'
+              AND UPDATED_AT IS NOT NULL
+            GROUP BY 1
+            ORDER BY 1 DESC
+            LIMIT 24
+        """).to_pandas()
+        df.columns = ["월", "탈퇴수"]
+        return df
+
+    @st.cache_data(ttl=300)
+    def get_withdrawal_kpi():
+        r = session.sql("""
+            SELECT
+                COUNT(*) AS total_del,
+                COUNT(CASE WHEN DATE_TRUNC('MONTH', UPDATED_AT) = DATE_TRUNC('MONTH', CURRENT_DATE)
+                           THEN 1 END) AS this_month_del
+            FROM AJDCAR_PROD.PUBLIC.USERS
+            WHERE IS_DELETED = TRUE
+              AND USER_NAME NOT LIKE '%테스트%'
+        """).collect()
+        return r[0]
+
+    wd_kpi = get_withdrawal_kpi()
+    wd1, wd2, wd3 = st.columns(3)
+    with wd1:
+        st.markdown(kpi_card("누적 탈퇴회원",
+                             f"{wd_kpi['TOTAL_DEL'] or 0:,}명"), unsafe_allow_html=True)
+    with wd2:
+        st.markdown(kpi_card("당월 탈퇴회원",
+                             f"{wd_kpi['THIS_MONTH_DEL'] or 0:,}명"), unsafe_allow_html=True)
+    with wd3:
+        total_inc_del = (kpi_usr["TOTAL"] or 0) + (wd_kpi["TOTAL_DEL"] or 0)
+        churn_rate = (wd_kpi["TOTAL_DEL"] / total_inc_del * 100) if total_inc_del else 0
+        st.markdown(kpi_card("탈퇴율 (누적)",
+                             f"{churn_rate:.1f}%",
+                             f"전체 가입 {total_inc_del:,}명 기준"), unsafe_allow_html=True)
+
+    df_wd = get_withdrawal_trend()
+    if not df_wd.empty:
+        wd_order = list(df_wd["월"])
+        wd_bar = alt.Chart(df_wd).mark_bar(color="#e03131").encode(
+            x=alt.X("월:N", sort=wd_order, title=None, axis=alt.Axis(labelAngle=-45)),
+            y=alt.Y("탈퇴수:Q", title="탈퇴수"),
+            tooltip=[alt.Tooltip("월:N"), alt.Tooltip("탈퇴수:Q", format=",")]
+        )
+        wd_lbl = alt.Chart(df_wd).mark_text(dy=-6, fontSize=10, color="#333333").encode(
+            x=alt.X("월:N", sort=wd_order),
+            y=alt.Y("탈퇴수:Q"),
+            text=alt.Text("탈퇴수:Q", format=",")
+        )
+        st.altair_chart(apply_theme(
+            (wd_bar + wd_lbl).properties(height=220, background=CHART_BG)
+        ), use_container_width=True)
+    else:
+        st.info("데이터 없음")
 
     # ── 계약체결 구간별 딜러 분포 ─────────────────
     st.markdown('<div class="section-title">계약체결 구간별 딜러 분포</div>', unsafe_allow_html=True)
