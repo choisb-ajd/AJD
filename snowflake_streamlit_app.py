@@ -13,6 +13,16 @@ st.markdown("""
 [data-testid="stAppViewContainer"] { background: #ffffff; }
 [data-testid="stSidebar"]          { background: #f8f9fa; }
 [data-testid="stHeader"]           { background: #ffffff; }
+
+/* ── 탭바 고정 (스크롤해도 상단 고정) ── */
+div[data-testid="stTabs"] > div:first-child {
+    position: sticky;
+    top: 2.875rem;
+    z-index: 999;
+    background-color: #ffffff;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #e0e0e0;
+}
 .kpi-card {
     background: #f0f2f6;
     border-radius: 8px;
@@ -1412,6 +1422,7 @@ with tab5:
 
     @st.cache_data(ttl=300)
     def get_cmp_kpi(d_from, d_to, mgr_f):
+        # COMPARISON_ESTIMATE PK 불명확 → COUNSEL_VEHICLE_ID (FK) 로 카운트
         r = session.sql(f"""
             SELECT
                 COUNT(DISTINCT ca.COUNSEL_ID) AS "전체상담건수",
@@ -1419,7 +1430,7 @@ with tab5:
                                     THEN ca.COUNSEL_ID END) AS "비견완료건수",
                 COUNT(DISTINCT CASE WHEN ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
                                     THEN ca.COUNSEL_ID END) AS "가입완료건수",
-                COUNT(DISTINCT ce.ID) AS "비견견적건수"
+                COUNT(DISTINCT ce.COUNSEL_VEHICLE_ID) AS "비견견적건수"
             FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
             LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
                 ON ca.COUNSEL_ID = cv.COUNSEL_ID
@@ -1459,7 +1470,7 @@ with tab5:
             SELECT
                 TO_CHAR(ca.CREATED_AT, 'YYYY-MM') AS "월",
                 COUNT(DISTINCT ca.COUNSEL_ID)       AS "전체상담",
-                COUNT(DISTINCT ce.ID)               AS "비견견적",
+                COUNT(DISTINCT ce.COUNSEL_VEHICLE_ID) AS "비견견적",
                 COUNT(DISTINCT CASE WHEN ca.COUNSEL_STATUS = 'COMPARISON_COMPLETED'
                                     THEN ca.COUNSEL_ID END) AS "비견완료",
                 COUNT(DISTINCT CASE WHEN ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
@@ -1504,8 +1515,8 @@ with tab5:
         df = session.sql(f"""
             SELECT
                 COALESCE(m.NAME, '미배정') AS "담당매니저",
-                COUNT(DISTINCT ca.COUNSEL_ID)   AS "전체상담",
-                COUNT(DISTINCT ce.ID)            AS "비견견적",
+                COUNT(DISTINCT ca.COUNSEL_ID)             AS "전체상담",
+                COUNT(DISTINCT ce.COUNSEL_VEHICLE_ID)      AS "비견견적",
                 COUNT(DISTINCT CASE WHEN ca.COUNSEL_STATUS = 'COMPARISON_COMPLETED'
                                     THEN ca.COUNSEL_ID END) AS "비견완료",
                 COUNT(DISTINCT CASE WHEN ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
@@ -1540,12 +1551,13 @@ with tab5:
 
     @st.cache_data(ttl=300)
     def get_cmp_vehicle(d_from, d_to, mgr_f):
+        # COMPARISON_REQUEST_VEHICLE은 COUNSEL_VEHICLE_ID로 직접 조인
         df = session.sql(f"""
             SELECT
-                TO_CHAR(ca.CREATED_AT, 'YYYY-MM') AS "월",
-                COUNT(DISTINCT crv.ID)              AS "비견요청차량수",
-                COUNT(DISTINCT ce.ID)               AS "비견견적수",
-                COUNT(DISTINCT ca.COUNSEL_ID)       AS "상담건수"
+                TO_CHAR(ca.CREATED_AT, 'YYYY-MM')      AS "월",
+                COUNT(DISTINCT crv.COUNSEL_VEHICLE_ID)  AS "비견요청차량수",
+                COUNT(DISTINCT ce.COUNSEL_VEHICLE_ID)   AS "비견견적수",
+                COUNT(DISTINCT ca.COUNSEL_ID)           AS "상담건수"
             FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
             LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
                 ON ca.COUNSEL_ID = cv.COUNSEL_ID
@@ -1553,7 +1565,7 @@ with tab5:
             LEFT JOIN AJDCAR_PROD.PUBLIC.COMPARISON_ESTIMATE ce
                 ON cv.ID = ce.COUNSEL_VEHICLE_ID
             LEFT JOIN AJDCAR_PROD.PUBLIC.COMPARISON_REQUEST_VEHICLE crv
-                ON ce.ID = crv.COMPARISON_ESTIMATE_ID
+                ON cv.ID = crv.COUNSEL_VEHICLE_ID
             LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON ca.COUNSEL_MANAGER_ID = m.ID
             WHERE ca.CREATED_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
               AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
@@ -1564,11 +1576,14 @@ with tab5:
         df.columns = ["월","비견요청차량수","비견견적수","상담건수"]
         return df
 
-    df_crv = get_cmp_vehicle(cmp_from, cmp_to, cmp_mgr_f)
-    if not df_crv.empty:
-        st.dataframe(df_crv, use_container_width=True, hide_index=True)
-    else:
-        st.info("데이터 없음")
+    try:
+        df_crv = get_cmp_vehicle(cmp_from, cmp_to, cmp_mgr_f)
+        if not df_crv.empty:
+            st.dataframe(df_crv, use_container_width=True, hide_index=True)
+        else:
+            st.info("데이터 없음")
+    except Exception as e:
+        st.warning(f"비견 요청 차량 조회 오류 (테이블 스키마 확인 필요): {e}")
 
     st.markdown('<div class="section-title">상태 이력 기반 비견 전환 분석 (counsel_status_log)</div>',
                 unsafe_allow_html=True)
@@ -1587,13 +1602,16 @@ with tab5:
         df.columns = ["상태", "월", "건수"]
         return df
 
-    df_sl = get_status_log(cmp_from, cmp_to)
-    if not df_sl.empty:
-        pv_sl = df_sl.pivot_table(
-            index="상태", columns="월", values="건수", aggfunc="sum", fill_value=0
-        ).reset_index()
-        m_sl = sorted([c for c in pv_sl.columns if c != "상태"], reverse=True)
-        pv_sl = pv_sl[["상태"] + m_sl]
-        st.dataframe(pv_sl, use_container_width=True, hide_index=True)
-    else:
-        st.info("데이터 없음")
+    try:
+        df_sl = get_status_log(cmp_from, cmp_to)
+        if not df_sl.empty:
+            pv_sl = df_sl.pivot_table(
+                index="상태", columns="월", values="건수", aggfunc="sum", fill_value=0
+            ).reset_index()
+            m_sl = sorted([c for c in pv_sl.columns if c != "상태"], reverse=True)
+            pv_sl = pv_sl[["상태"] + m_sl]
+            st.dataframe(pv_sl, use_container_width=True, hide_index=True)
+        else:
+            st.info("데이터 없음")
+    except Exception as e:
+        st.warning(f"상태 이력 조회 오류 (테이블 스키마 확인 필요): {e}")
