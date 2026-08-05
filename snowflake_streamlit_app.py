@@ -1910,23 +1910,73 @@ with tab6:
     })
     st.dataframe(df_offb2b, use_container_width=True, hide_index=True)
 
-    # ── 6. 딜러 브랜드별 분포 (정적 — 브랜드 컬럼 없음) ────────
+    # ── 6. 딜러 브랜드별 분포 ✅ Snowflake (PRIMARY_AFFILIATION 기준) ─
     st.markdown('<div class="section-title">딜러 브랜드별 앱가입·활동회원·계약건수 분포</div>',
                 unsafe_allow_html=True)
-    st.caption("ℹ️ 브랜드(현대/기아 등) 컬럼이 USERS 테이블에 없음 — 스프레드시트 기준 정적 데이터")
-    df_brand = pd.DataFrame({
-        "G속성": ["G2","G2","G2","G2","G2","G2","G2소계",
-                  "G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1","G1소계","전체합계"],
-        "브랜드": ["현대","기아","르노","KGM","쉐보레","-","G2(국산)",
-                  "BMW","벤츠","볼보","BYD","렉서스","아우디","폭스바겐","포드,링컨","지프","MINI",
-                  "토요타","혼다","캐딜락","포르쉐","푸조","폴스타","재규어","랜드로버","G1(수입)","총계"],
-        "앱가입(명)": [310,210,77,30,21,1,649,127,127,95,67,45,42,19,19,13,11,11,8,8,7,4,1,1,1,606,1255],
-        "활동(60일)": [102,86,20,5,10,1,224,55,48,35,38,18,14,8,5,7,8,3,6,4,6,1,1,None,None,257,481],
-        "활동(90일)": [130,102,28,7,10,1,278,61,55,41,39,22,22,9,5,9,8,3,7,5,6,2,1,None,None,295,573],
-        "체결수(90일)": [401,377,89,17,28,1,913,329,182,111,245,52,54,30,17,19,48,8,17,10,15,3,1,None,None,1141,2054],
-        "건당평균": [1.3,1.8,1.2,0.6,1.3,1.0,1.4,2.6,1.4,1.2,3.7,1.2,1.3,1.6,0.9,1.5,4.4,0.7,2.1,1.3,2.1,0.8,1.0,None,None,2.0,2.0],
-    })
-    st.dataframe(df_brand, use_container_width=True, hide_index=True)
+    st.caption("USERS.PRIMARY_AFFILIATION(1차소속) 기준, 직전 90일 체결건수 포함")
+
+    @st.cache_data(ttl=300)
+    def get_t6_brand_dist():
+        df = session.sql(f"""
+            WITH deal90 AS (
+                SELECT USER_ID, COUNT(*) AS cnt90
+                FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION
+                WHERE COUNSEL_STATUS = 'JOIN_COMPLETED'
+                  AND JOIN_COMPLETED_AT >= DATEADD('DAY', -90, CURRENT_DATE)
+                  AND (IS_DELETED = FALSE OR IS_DELETED IS NULL)
+                GROUP BY 1
+            ),
+            deal60 AS (
+                SELECT USER_ID, COUNT(*) AS cnt60
+                FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION
+                WHERE COUNSEL_STATUS = 'JOIN_COMPLETED'
+                  AND JOIN_COMPLETED_AT >= DATEADD('DAY', -60, CURRENT_DATE)
+                  AND (IS_DELETED = FALSE OR IS_DELETED IS NULL)
+                GROUP BY 1
+            )
+            SELECT
+                {G_ATTR_EXPR}                                      AS "G속성",
+                COALESCE(u.PRIMARY_AFFILIATION, '미분류')          AS "브랜드(1차소속)",
+                COUNT(DISTINCT u.ID)                               AS "앱가입(명)",
+                COUNT(DISTINCT CASE WHEN d60.cnt60 > 0 THEN u.ID END) AS "활동(60일)",
+                COUNT(DISTINCT CASE WHEN d90.cnt90 > 0 THEN u.ID END) AS "활동(90일)",
+                COALESCE(SUM(d90.cnt90), 0)                        AS "체결수(90일)",
+                ROUND(COALESCE(SUM(d90.cnt90), 0)
+                      / NULLIF(COUNT(DISTINCT u.ID), 0), 2)        AS "건당평균"
+            FROM AJDCAR_PROD.PUBLIC.USERS u
+            LEFT JOIN deal60 d60 ON u.ID = d60.USER_ID
+            LEFT JOIN deal90 d90 ON u.ID = d90.USER_ID
+            WHERE {USER_FILTER}
+            GROUP BY 1, 2
+            ORDER BY 1, 3 DESC
+        """).to_pandas()
+        df.columns = ["G속성","브랜드(1차소속)","앱가입(명)","활동(60일)","활동(90일)","체결수(90일)","건당평균"]
+        return df
+
+    try:
+        df_brand = get_t6_brand_dist()
+        if not df_brand.empty:
+            br1, br2 = st.columns([3, 2])
+            with br1:
+                st.dataframe(df_brand, use_container_width=True, hide_index=True)
+            with br2:
+                df_brand_top = df_brand[~df_brand["G속성"].str.contains("소계|합계|미분류", na=False)].copy()
+                chart_br = alt.Chart(df_brand_top).mark_bar().encode(
+                    x=alt.X("앱가입(명):Q", title="앱가입(명)"),
+                    y=alt.Y("브랜드(1차소속):N", sort="-x", title=None),
+                    color=alt.Color("G속성:N", legend=alt.Legend(title="G속성")),
+                    tooltip=["G속성","브랜드(1차소속)",
+                             alt.Tooltip("앱가입(명):Q", format=","),
+                             alt.Tooltip("활동(90일):Q", format=","),
+                             alt.Tooltip("체결수(90일):Q", format=","),
+                             alt.Tooltip("건당평균:Q")],
+                ).properties(height=400, title="브랜드별 앱가입 현황")
+                st.altair_chart(apply_theme(chart_br.properties(background=CHART_BG)),
+                                use_container_width=True)
+        else:
+            st.info("데이터 없음")
+    except Exception as e:
+        st.warning(f"브랜드별 분포 조회 오류: {e}")
 
     # ── 7. 가동 딜러수 (월별·G속성별) ✅ Snowflake ─────────────
     st.markdown('<div class="section-title">가동 딜러수 (월별·G속성별)</div>', unsafe_allow_html=True)
