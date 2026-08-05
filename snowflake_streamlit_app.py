@@ -293,60 +293,51 @@ with tab1:
     st.markdown('<div class="section-title">탈퇴회원 추이</div>', unsafe_allow_html=True)
 
     @st.cache_data(ttl=300)
-    def get_withdrawal_trend():
-        df = session.sql("""
-            SELECT
-                TO_CHAR(UPDATED_AT, 'YYYY-MM') AS "월",
-                COUNT(*) AS "탈퇴수"
-            FROM AJDCAR_PROD.PUBLIC.USERS
-            WHERE IS_DELETED = TRUE
-              AND USER_NAME NOT LIKE '%테스트%'
-              AND UPDATED_AT IS NOT NULL
-            GROUP BY 1
-            ORDER BY 1 DESC
-            LIMIT 24
-        """).to_pandas()
-        df.columns = ["월", "탈퇴수"]
-        return df
-
-    @st.cache_data(ttl=300)
-    def get_withdrawal_kpi():
+    def get_withdrawal_data():
+        # 날짜 컬럼 없이 IS_DELETED=TRUE로 집계; 가입월(CREATED_AT) 기준으로 추이 표시
         r = session.sql("""
-            SELECT
-                COUNT(*) AS total_del,
-                COUNT(CASE WHEN DATE_TRUNC('MONTH', UPDATED_AT) = DATE_TRUNC('MONTH', CURRENT_DATE)
-                           THEN 1 END) AS this_month_del
+            SELECT COUNT(*) AS total_del
             FROM AJDCAR_PROD.PUBLIC.USERS
             WHERE IS_DELETED = TRUE
               AND USER_NAME NOT LIKE '%테스트%'
         """).collect()
-        return r[0]
+        df = session.sql("""
+            SELECT
+                TO_CHAR(CREATED_AT, 'YYYY-MM') AS "가입월",
+                COUNT(*) AS "탈퇴수"
+            FROM AJDCAR_PROD.PUBLIC.USERS
+            WHERE IS_DELETED = TRUE
+              AND USER_NAME NOT LIKE '%테스트%'
+              AND CREATED_AT IS NOT NULL
+            GROUP BY 1
+            ORDER BY 1 DESC
+            LIMIT 24
+        """).to_pandas()
+        df.columns = ["가입월", "탈퇴수"]
+        return r[0], df
 
-    wd_kpi = get_withdrawal_kpi()
-    wd1, wd2, wd3 = st.columns(3)
+    wd_kpi, df_wd = get_withdrawal_data()
+    total_del = wd_kpi["TOTAL_DEL"] or 0
+    total_inc_del = (kpi_usr["TOTAL"] or 0) + total_del
+    churn_rate = (total_del / total_inc_del * 100) if total_inc_del else 0
+
+    wd1, wd2 = st.columns(2)
     with wd1:
-        st.markdown(kpi_card("누적 탈퇴회원",
-                             f"{wd_kpi['TOTAL_DEL'] or 0:,}명"), unsafe_allow_html=True)
+        st.markdown(kpi_card("누적 탈퇴회원", f"{total_del:,}명"), unsafe_allow_html=True)
     with wd2:
-        st.markdown(kpi_card("당월 탈퇴회원",
-                             f"{wd_kpi['THIS_MONTH_DEL'] or 0:,}명"), unsafe_allow_html=True)
-    with wd3:
-        total_inc_del = (kpi_usr["TOTAL"] or 0) + (wd_kpi["TOTAL_DEL"] or 0)
-        churn_rate = (wd_kpi["TOTAL_DEL"] / total_inc_del * 100) if total_inc_del else 0
-        st.markdown(kpi_card("탈퇴율 (누적)",
-                             f"{churn_rate:.1f}%",
-                             f"전체 가입 {total_inc_del:,}명 기준"), unsafe_allow_html=True)
+        st.markdown(kpi_card("탈퇴율 (누적)", f"{churn_rate:.1f}%",
+                             f"전체 가입(탈퇴 포함) {total_inc_del:,}명 기준"), unsafe_allow_html=True)
 
-    df_wd = get_withdrawal_trend()
     if not df_wd.empty:
-        wd_order = list(df_wd["월"])
+        st.caption("가입월 기준 탈퇴회원 분포 (탈퇴일자 컬럼 없음 — 가입 코호트별 탈퇴수)")
+        wd_order = list(df_wd["가입월"])
         wd_bar = alt.Chart(df_wd).mark_bar(color="#e03131").encode(
-            x=alt.X("월:N", sort=wd_order, title=None, axis=alt.Axis(labelAngle=-45)),
+            x=alt.X("가입월:N", sort=wd_order, title=None, axis=alt.Axis(labelAngle=-45)),
             y=alt.Y("탈퇴수:Q", title="탈퇴수"),
-            tooltip=[alt.Tooltip("월:N"), alt.Tooltip("탈퇴수:Q", format=",")]
+            tooltip=[alt.Tooltip("가입월:N"), alt.Tooltip("탈퇴수:Q", format=",")]
         )
         wd_lbl = alt.Chart(df_wd).mark_text(dy=-6, fontSize=10, color="#333333").encode(
-            x=alt.X("월:N", sort=wd_order),
+            x=alt.X("가입월:N", sort=wd_order),
             y=alt.Y("탈퇴수:Q"),
             text=alt.Text("탈퇴수:Q", format=",")
         )
