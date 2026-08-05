@@ -258,12 +258,33 @@ with tab1:
 
     # ── G1~G5 ────────────────────────────────────
     st.markdown('<div class="section-title">앱 가입현황 (딜러그룹별)</div>', unsafe_allow_html=True)
+
+    @st.cache_data(ttl=300)
+    def get_g_attr_users():
+        df = session.sql(f"""
+            SELECT
+                {G_ATTR_EXPR} AS g_attr,
+                COUNT(*) AS cnt,
+                COUNT(CASE WHEN DATE_TRUNC('MONTH', CREATED_AT) = DATE_TRUNC('MONTH', CURRENT_DATE)
+                           THEN 1 END) AS this_month
+            FROM AJDCAR_PROD.PUBLIC.USERS u
+            WHERE {USER_FILTER}
+            GROUP BY 1
+        """).to_pandas()
+        df.columns = ["g_attr", "cnt", "this_month"]
+        return df
+
+    df_g = get_g_attr_users()
+    G_ORDER = ["G1(수입)", "G2(국산)", "G3(중고차)", "G4(보험설계)", "G5(에이전시)"]
+    g_map = dict(zip(df_g["g_attr"], zip(df_g["cnt"], df_g["this_month"])))
+
     gcols = st.columns(5)
-    for i, col in enumerate(gcols, 1):
+    for col, g in zip(gcols, G_ORDER):
+        vals = g_map.get(g, (0, 0))
+        total_g, month_g = int(vals[0]), int(vals[1])
         with col:
-            st.markdown(f'<div class="kpi-card"><div class="kpi-label">G{i}</div>'
-                        f'<div class="kpi-value-lg">-</div>'
-                        f'<div class="kpi-neutral">데이터 준비중</div></div>', unsafe_allow_html=True)
+            st.markdown(kpi_card(g, f"{total_g:,}명",
+                                 f"당월 +{month_g:,}명", "neutral"), unsafe_allow_html=True)
 
     # ── 계약체결 구간별 딜러 분포 ─────────────────
     st.markdown('<div class="section-title">계약체결 구간별 딜러 분포</div>', unsafe_allow_html=True)
@@ -1611,6 +1632,19 @@ with tab5:
     st.markdown('<div class="section-title">상태 이력 기반 비견 전환 분석 (counsel_status_log)</div>',
                 unsafe_allow_html=True)
 
+    STATUS_KO = {
+        "ACCUMULATE_PENDING":       "누적 대기",
+        "CALL_TRANSFER_ATTEMPTED":  "콜 전달 시도",
+        "COMPARISON_COMPLETED":     "비견 완료",
+        "COMPARISON_IN_PROGRESS":   "비견 진행중",
+        "COUNSEL_CLOSED":           "상담 종료",
+        "COUNSEL_REQUEST":          "상담 요청",
+        "CUSTOMER_EXCLUDED":        "고객 제외",
+        "JOIN_CANCELLED":           "가입 취소",
+        "JOIN_COMPLETED":           "가입 완료",
+        "PROSPECT_COUNSEL":         "잠재 상담",
+    }
+
     @st.cache_data(ttl=300)
     def get_status_log(d_from, d_to):
         df = session.sql(f"""
@@ -1623,6 +1657,7 @@ with tab5:
             GROUP BY 1, 2 ORDER BY 2 DESC, 3 DESC
         """).to_pandas()
         df.columns = ["상태", "월", "건수"]
+        df["상태"] = df["상태"].map(lambda x: STATUS_KO.get(x, x))
         return df
 
     try:
