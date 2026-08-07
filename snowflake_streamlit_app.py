@@ -2350,9 +2350,118 @@ with tab7:
         st.dataframe(df_both, use_container_width=True, hide_index=True)
 
         st.download_button(
-            "⬇ CSV 다운로드",
+            "⬇ CSV 다운로드 (집계)",
             df_mgr.to_csv(index=False, encoding="utf-8-sig"),
             f"mgr_perf_{mgr7_from}_{mgr7_to}.csv",
             "text/csv",
             key="mgr7_dl",
         )
+
+    # ── Raw 데이터 ─────────────────────────────────────────────
+    st.markdown('<div class="section-title">가입완료 Raw 데이터</div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div class="criteria-box">
+    📌 <b>Raw 데이터 컬럼 안내</b><br>
+    • <b>주유권</b>: Snowflake 미연동 — 추후 반영 예정<br>
+    • <b>직전1년 본인혜택건수</b>: 추가 예정<br>
+    • <b>갱신-직전60일 딜러계약건수</b>: 추가 예정<br>
+    • <b>가입경로(CM/TM)</b>: CHANNEL_PATH 기준 (INBOUND→CS/TM, DEALER_APP→딜러앱)<br>
+    • 차량번호·만기월·영업용여부는 COUNSEL_VEHICLE 테이블 기준
+    </div>
+    """, unsafe_allow_html=True)
+
+    @st.cache_data(ttl=300)
+    def get_raw_joined(d_from, d_to):
+        df = session.sql(f"""
+            SELECT
+                /* 영업채널 */
+                {CH_EXPR}                                                          AS "영업채널",
+
+                /* 고객 정보 */
+                COALESCE(cv.CUSTOMER_NAME, '-')                                    AS "고객명",
+                COALESCE(cv.CAR_NUMBER, '-')                                       AS "차량번호",
+                cv.CONTRACT_AMOUNT                                                 AS "보험료",
+                COALESCE(ca.JOIN_INSURER_CODE, '-')                                AS "가입보험사",
+
+                /* 가입경로: CHANNEL_PATH 원값 그대로 표기 */
+                COALESCE(ca.CHANNEL_PATH, '-')                                     AS "가입경로",
+
+                /* 만기월 */
+                COALESCE(TO_CHAR(cv.EXPIRY_DATE, 'YYYY-MM'), '-')                 AS "만기월",
+
+                /* 영업용 여부 */
+                CASE
+                    WHEN cv.CAR_TYPE = 'COMMERCIAL' THEN '영업용'
+                    WHEN cv.CAR_TYPE IS NULL        THEN '-'
+                    ELSE '비영업용'
+                END                                                                AS "영업용여부",
+
+                /* 체결 일자 / 월 */
+                ca.JOIN_COMPLETED_AT::DATE                                         AS "체결일자",
+                TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM')                          AS "체결월",
+
+                /* 매니저 */
+                COALESCE(m.NAME, '미배정')                                         AS "매니저",
+
+                /* 주유권 — Snowflake 미연동, 추후 반영 */
+                NULL                                                               AS "주유권",
+
+                /* 회원 정보 */
+                u.USER_NAME                                                        AS "회원명",
+                u.USER_ID                                                          AS "회원ID",
+                COALESCE(u.PRIMARY_AFFILIATION, '-')                              AS "브랜드",
+
+                /* 추가 예정 */
+                NULL                                                               AS "직전1년본인혜택건수",
+                NULL                                                               AS "갱신_직전60일딜러계약건수"
+
+            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
+            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
+                ON ca.COUNSEL_ID = cv.COUNSEL_ID
+                AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
+            LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u
+                ON ca.USER_ID = u.ID
+            LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m
+                ON ca.COUNSEL_MANAGER_ID = m.ID
+            WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
+              AND ca.JOIN_COMPLETED_AT IS NOT NULL
+              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
+              AND ca.JOIN_COMPLETED_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
+              AND (m.NAME IS NULL OR m.NAME NOT LIKE '%테스트%')
+            ORDER BY ca.JOIN_COMPLETED_AT DESC
+        """).to_pandas()
+        return df
+
+    try:
+        df_raw = get_raw_joined(mgr7_from, mgr7_to)
+
+        # 컬럼 오류 발생 시 fallback: 존재하지 않는 컬럼은 '-' 로 채움
+        col_order = [
+            "영업채널","고객명","차량번호","보험료","가입보험사","가입경로",
+            "만기월","영업용여부","체결일자","체결월","매니저",
+            "주유권","회원명","회원ID","브랜드",
+            "직전1년본인혜택건수","갱신_직전60일딜러계약건수",
+        ]
+        for c in col_order:
+            if c not in df_raw.columns:
+                df_raw[c] = "-"
+        df_raw = df_raw[col_order]
+
+        # 보험료 포맷
+        df_raw_disp = df_raw.copy()
+        df_raw_disp["보험료"] = df_raw_disp["보험료"].apply(
+            lambda x: f"{int(x):,}" if pd.notna(x) and x else "-"
+        )
+
+        st.caption(f"총 {len(df_raw_disp):,}건 — {mgr7_from} ~ {mgr7_to}")
+        st.dataframe(df_raw_disp, use_container_width=True, hide_index=True, height=500)
+
+        st.download_button(
+            "⬇ Raw 데이터 CSV 다운로드",
+            df_raw.to_csv(index=False, encoding="utf-8-sig"),
+            f"raw_joined_{mgr7_from}_{mgr7_to}.csv",
+            "text/csv",
+            key="mgr7_raw_dl",
+        )
+    except Exception as e:
+        st.warning(f"Raw 데이터 조회 오류 (컬럼명 확인 필요): {e}")
