@@ -185,13 +185,14 @@ st.markdown("""
 
 # 탭 구성
 # ════════════════════════════════════
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📊 영업현황",
     "🏢 보험사별 현황",
     "❌ 취소건 현황",
     "💤 비활동 딜러 현황",
     "🔍 비견건수",
     "📈 주요지표분석",
+    "👤 매니저별 실적",
 ])
 
 # ═══════════════════════════════════════════════════════════════
@@ -2134,3 +2135,224 @@ with tab6:
         ).properties(height=280, title="G속성·연령대별 딜러 분포")
         st.altair_chart(apply_theme(chart_age.properties(background=CHART_BG)),
                         use_container_width=True)
+
+# ═══════════════════════════════════════════════════════════════
+# TAB 7 — 매니저별 실적
+# ═══════════════════════════════════════════════════════════════
+with tab7:
+
+    st.markdown("""
+    <div class="criteria-box">
+    📌 <b>집계 기준</b><br>
+    • 영업채널: 갱신(RENEWAL), CS(INBOUND), 딜러앱(DEALER_APP), 기타<br>
+    • 체결 기준: COUNSEL_STATUS = 'JOIN_COMPLETED'<br>
+    • 테스트 매니저 제외 / 삭제건 제외
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── 필터 ──────────────────────────────────────
+    mf1, mf2, mf3, mf4 = st.columns(4)
+    with mf1:
+        mgr7_from = st.date_input("시작일", value=today.replace(day=1), key="mgr7_from")
+    with mf2:
+        mgr7_to = st.date_input("종료일", value=today, key="mgr7_to")
+    with mf3:
+        mgr7_metric = st.radio("지표", ["원수보험료", "체결건수"], horizontal=True, key="mgr7_metric")
+    with mf4:
+        mgr7_unit = st.radio("단위", ["월별", "일별"], horizontal=True, key="mgr7_unit")
+
+    CH_LIST = ["갱신", "딜러앱", "CS", "기타"]
+
+    # ── 데이터 로드 ───────────────────────────────
+    @st.cache_data(ttl=300)
+    def get_mgr_perf(d_from, d_to, unit):
+        grp = (
+            "TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM')"
+            if unit == "월별"
+            else "TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM-DD')"
+        )
+        df = session.sql(f"""
+            SELECT
+                {grp}                          AS "기간",
+                COALESCE(m.NAME, '미배정')      AS "매니저",
+                {CH_EXPR}                       AS "채널",
+                SUM(cv.CONTRACT_AMOUNT)         AS "원수보험료",
+                COUNT(*)                        AS "체결건수"
+            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
+            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
+                ON ca.COUNSEL_ID = cv.COUNSEL_ID
+                AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
+            LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON ca.COUNSEL_MANAGER_ID = m.ID
+            WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
+              AND ca.JOIN_COMPLETED_AT IS NOT NULL
+              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
+              AND ca.JOIN_COMPLETED_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
+              AND (m.NAME IS NULL OR m.NAME NOT LIKE '%테스트%')
+            GROUP BY 1, 2, 3
+            ORDER BY 1 DESC, 2, 3
+        """).to_pandas()
+        df.columns = ["기간", "매니저", "채널", "원수보험료", "체결건수"]
+        return df
+
+    try:
+        df_mgr = get_mgr_perf(mgr7_from, mgr7_to, mgr7_unit)
+    except Exception as e:
+        st.error(f"데이터 조회 오류: {e}")
+        df_mgr = pd.DataFrame()
+
+    if df_mgr.empty:
+        st.info("데이터 없음")
+    else:
+        val_col = mgr7_metric  # "원수보험료" or "체결건수"
+
+        # ── KPI 요약 (매니저별 합계) ──────────────
+        st.markdown('<div class="section-title">매니저별 합계</div>', unsafe_allow_html=True)
+
+        df_kpi = (
+            df_mgr.groupby("매니저")[["원수보험료", "체결건수"]]
+            .sum()
+            .reset_index()
+            .sort_values("원수보험료", ascending=False)
+        )
+        total_row = pd.DataFrame({
+            "매니저": ["합계"],
+            "원수보험료": [df_kpi["원수보험료"].sum()],
+            "체결건수": [df_kpi["체결건수"].sum()],
+        })
+        df_kpi_disp = pd.concat([df_kpi, total_row], ignore_index=True)
+
+        kpi_cols = st.columns(len(df_kpi))
+        for col, (_, row) in zip(kpi_cols, df_kpi.iterrows()):
+            with col:
+                st.markdown(
+                    kpi_card(
+                        row["매니저"],
+                        f"{int(row['체결건수']):,}건",
+                        fmt_won(row["원수보험료"]),
+                        "neutral",
+                        small=True,
+                    ),
+                    unsafe_allow_html=True,
+                )
+
+        # ── 피벗 테이블: 기간 × 채널 (매니저별) ──
+        st.markdown('<div class="section-title">기간 × 영업채널 피벗</div>', unsafe_allow_html=True)
+
+        # 전체 합산 피벗 (매니저 통합)
+        df_pv_all = df_mgr.groupby(["기간", "채널"])[val_col].sum().reset_index()
+        pv_all = df_pv_all.pivot_table(
+            index="기간", columns="채널", values=val_col, aggfunc="sum", fill_value=0
+        ).reset_index()
+        for ch in CH_LIST:
+            if ch not in pv_all.columns:
+                pv_all[ch] = 0
+        pv_all["총계"] = pv_all[CH_LIST].sum(axis=1)
+        pv_all = pv_all[["기간"] + CH_LIST + ["총계"]].sort_values("기간", ascending=False).reset_index(drop=True)
+
+        if val_col == "원수보험료":
+            fmt_fn = lambda x: f"{int(x):,}" if x else "-"
+        else:
+            fmt_fn = lambda x: f"{int(x):,}건" if x else "-"
+
+        pv_disp = pv_all.copy()
+        for c in CH_LIST + ["총계"]:
+            pv_disp[c] = pv_disp[c].apply(fmt_fn)
+
+        st.caption(f"전체 매니저 합산 — {val_col}")
+        st.dataframe(pv_disp, use_container_width=True, hide_index=True)
+
+        # ── 매니저별 피벗 (expander) ─────────────
+        st.markdown('<div class="section-title">매니저별 상세 피벗</div>', unsafe_allow_html=True)
+        mgr_list_7 = sorted(df_mgr["매니저"].unique())
+        for mgr_name in mgr_list_7:
+            df_m = df_mgr[df_mgr["매니저"] == mgr_name]
+            df_pv_m = df_m.groupby(["기간", "채널"])[val_col].sum().reset_index()
+            pv_m = df_pv_m.pivot_table(
+                index="기간", columns="채널", values=val_col, aggfunc="sum", fill_value=0
+            ).reset_index()
+            for ch in CH_LIST:
+                if ch not in pv_m.columns:
+                    pv_m[ch] = 0
+            pv_m["총계"] = pv_m[CH_LIST].sum(axis=1)
+            pv_m = pv_m[["기간"] + CH_LIST + ["총계"]].sort_values("기간", ascending=False).reset_index(drop=True)
+
+            total_sum = int(pv_m["총계"].sum())
+            label_fmt = fmt_won(total_sum) if val_col == "원수보험료" else f"{total_sum:,}건"
+
+            with st.expander(f"▶ {mgr_name}  ({label_fmt})"):
+                pv_m_disp = pv_m.copy()
+                for c in CH_LIST + ["총계"]:
+                    pv_m_disp[c] = pv_m_disp[c].apply(fmt_fn)
+                st.dataframe(pv_m_disp, use_container_width=True, hide_index=True)
+
+        # ── 시각화 ───────────────────────────────
+        st.markdown('<div class="section-title">시각화</div>', unsafe_allow_html=True)
+
+        v1, v2 = st.columns(2)
+
+        with v1:
+            st.caption(f"매니저 × 영업채널별 {val_col} (전체 기간 합산)")
+            df_vis1 = df_mgr.groupby(["매니저", "채널"])[val_col].sum().reset_index()
+            mgr_order = (
+                df_vis1.groupby("매니저")[val_col]
+                .sum()
+                .sort_values(ascending=False)
+                .index.tolist()
+            )
+            ch_colors = {
+                "갱신": "#4c78a8",
+                "딜러앱": "#5ba85a",
+                "CS": "#f4a261",
+                "기타": "#aaaaaa",
+            }
+            chart_v1 = alt.Chart(df_vis1).mark_bar().encode(
+                x=alt.X("매니저:N", sort=mgr_order, title=None),
+                y=alt.Y(f"{val_col}:Q", title=val_col,
+                        axis=alt.Axis(format=",.0f" if val_col == "원수보험료" else ",")),
+                color=alt.Color("채널:N",
+                                scale=alt.Scale(domain=CH_LIST,
+                                                range=[ch_colors[c] for c in CH_LIST]),
+                                legend=alt.Legend(title="채널")),
+                tooltip=[
+                    alt.Tooltip("매니저:N"),
+                    alt.Tooltip("채널:N"),
+                    alt.Tooltip(f"{val_col}:Q", format=","),
+                ],
+            ).properties(height=300, background=CHART_BG)
+            st.altair_chart(apply_theme(chart_v1), use_container_width=True)
+
+        with v2:
+            st.caption(f"기간별 매니저 {val_col} 추이")
+            df_vis2 = df_mgr.groupby(["기간", "매니저"])[val_col].sum().reset_index()
+            period_order_7 = sorted(df_vis2["기간"].unique(), reverse=True)
+            chart_v2 = alt.Chart(df_vis2).mark_line(point=True).encode(
+                x=alt.X("기간:N", sort=period_order_7, title=None,
+                        axis=alt.Axis(labelAngle=-45)),
+                y=alt.Y(f"{val_col}:Q", title=val_col,
+                        axis=alt.Axis(format=",.0f" if val_col == "원수보험료" else ",")),
+                color=alt.Color("매니저:N", legend=alt.Legend(title="매니저")),
+                tooltip=[
+                    alt.Tooltip("기간:N"),
+                    alt.Tooltip("매니저:N"),
+                    alt.Tooltip(f"{val_col}:Q", format=","),
+                ],
+            ).properties(height=300, background=CHART_BG)
+            st.altair_chart(apply_theme(chart_v2), use_container_width=True)
+
+        # ── 원수보험료·건수 동시 표 (전체) ────────
+        st.markdown('<div class="section-title">전체 상세 데이터 (원수보험료 + 체결건수)</div>',
+                    unsafe_allow_html=True)
+
+        df_both = df_mgr.groupby(["기간", "매니저", "채널"])[["원수보험료", "체결건수"]].sum().reset_index()
+        df_both = df_both.sort_values(["기간", "매니저", "채널"], ascending=[False, True, True]).reset_index(drop=True)
+        df_both["원수보험료"] = df_both["원수보험료"].apply(lambda x: f"{int(x):,}")
+        df_both["체결건수"] = df_both["체결건수"].apply(lambda x: f"{int(x):,}건")
+        st.dataframe(df_both, use_container_width=True, hide_index=True)
+
+        st.download_button(
+            "⬇ CSV 다운로드",
+            df_mgr.to_csv(index=False, encoding="utf-8-sig"),
+            f"mgr_perf_{mgr7_from}_{mgr7_to}.csv",
+            "text/csv",
+            key="mgr7_dl",
+        )
