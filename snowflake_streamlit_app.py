@@ -909,6 +909,161 @@ with tab1:
                     mime="text/csv", key=f"dl_{cat_num}"
                 )
 
+    # ── 광고비 포인트 현황 ────────────────────────
+    st.markdown('<div class="section-title">광고비 포인트 현황 (USERS.AD_POINT 기준)</div>',
+                unsafe_allow_html=True)
+    st.markdown("""
+    <div class="criteria-box">
+    📌 <b>집계 기준</b><br>
+    • <code>USERS.AD_POINT</code>: 딜러별 현재 광고비 포인트 <b>잔액</b><br>
+    • 거래 이력(적립/출금 추이)은 AD_POINT_TRANSACTIONS 테이블 적재 후 제공 예정<br>
+    • 테스트 계정·탈퇴회원 제외
+    </div>
+    """, unsafe_allow_html=True)
+
+    @st.cache_data(ttl=300)
+    def get_adpoint_kpi():
+        r = session.sql(f"""
+            SELECT
+                COUNT(*)                                        AS "전체딜러수",
+                SUM(AD_POINT)                                   AS "포인트총합",
+                COUNT(CASE WHEN AD_POINT > 0 THEN 1 END)       AS "포인트보유수",
+                COUNT(CASE WHEN AD_POINT = 0 THEN 1 END)       AS "포인트없음",
+                ROUND(AVG(CASE WHEN AD_POINT > 0 THEN AD_POINT END), 0) AS "보유자평균"
+            FROM AJDCAR_PROD.PUBLIC.USERS
+            WHERE {USER_FILTER}
+        """).collect()
+        return r[0]
+
+    @st.cache_data(ttl=300)
+    def get_adpoint_g():
+        df = session.sql(f"""
+            SELECT
+                {G_ATTR_EXPR}                                   AS "G속성",
+                COUNT(*)                                        AS "딜러수",
+                SUM(u.AD_POINT)                                 AS "포인트합계",
+                COUNT(CASE WHEN u.AD_POINT > 0 THEN 1 END)     AS "보유수",
+                ROUND(AVG(CASE WHEN u.AD_POINT > 0
+                               THEN u.AD_POINT END), 0)        AS "보유자평균"
+            FROM AJDCAR_PROD.PUBLIC.USERS u
+            WHERE {USER_FILTER}
+            GROUP BY 1 ORDER BY 3 DESC
+        """).to_pandas()
+        df.columns = ["G속성", "딜러수", "포인트합계", "보유수", "보유자평균"]
+        return df
+
+    @st.cache_data(ttl=300)
+    def get_adpoint_mgr():
+        df = session.sql(f"""
+            SELECT
+                COALESCE(m.NAME, '미배정')                      AS "담당매니저",
+                COUNT(*)                                        AS "딜러수",
+                SUM(u.AD_POINT)                                 AS "포인트합계",
+                COUNT(CASE WHEN u.AD_POINT > 0 THEN 1 END)     AS "보유수",
+                ROUND(AVG(CASE WHEN u.AD_POINT > 0
+                               THEN u.AD_POINT END), 0)        AS "보유자평균"
+            FROM AJDCAR_PROD.PUBLIC.USERS u
+            LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON u.MANAGER_ID = m.ID
+            WHERE {USER_FILTER}
+            GROUP BY 1 ORDER BY 3 DESC
+        """).to_pandas()
+        df.columns = ["담당매니저", "딜러수", "포인트합계", "보유수", "보유자평균"]
+        return df
+
+    @st.cache_data(ttl=300)
+    def get_adpoint_bucket():
+        df = session.sql(f"""
+            SELECT
+                CASE
+                    WHEN u.AD_POINT = 0                          THEN '0원'
+                    WHEN u.AD_POINT < 100000                     THEN '1~10만원 미만'
+                    WHEN u.AD_POINT < 500000                     THEN '10~50만원 미만'
+                    WHEN u.AD_POINT < 1000000                    THEN '50~100만원 미만'
+                    ELSE '100만원 이상'
+                END                                             AS "구간",
+                COUNT(*)                                        AS "딜러수",
+                SUM(u.AD_POINT)                                 AS "포인트합계"
+            FROM AJDCAR_PROD.PUBLIC.USERS u
+            WHERE {USER_FILTER}
+            GROUP BY 1
+            ORDER BY MIN(u.AD_POINT)
+        """).to_pandas()
+        df.columns = ["구간", "딜러수", "포인트합계"]
+        return df
+
+    try:
+        ap_kpi = get_adpoint_kpi()
+        ap1, ap2, ap3, ap4, ap5 = st.columns(5)
+        with ap1:
+            st.markdown(kpi_card("총 포인트 잔액", fmt_won(ap_kpi["포인트총합"] or 0)), unsafe_allow_html=True)
+        with ap2:
+            st.markdown(kpi_card("포인트 보유 딜러", f"{ap_kpi['포인트보유수'] or 0:,}명"), unsafe_allow_html=True)
+        with ap3:
+            st.markdown(kpi_card("포인트 미보유 딜러", f"{ap_kpi['포인트없음'] or 0:,}명"), unsafe_allow_html=True)
+        with ap4:
+            total_d = ap_kpi["전체딜러수"] or 1
+            보유율 = (ap_kpi["포인트보유수"] or 0) / total_d * 100
+            st.markdown(kpi_card("포인트 보유율", f"{보유율:.1f}%"), unsafe_allow_html=True)
+        with ap5:
+            st.markdown(kpi_card("보유자 평균 잔액", fmt_won(ap_kpi["보유자평균"] or 0)), unsafe_allow_html=True)
+
+        ap_c1, ap_c2 = st.columns(2)
+
+        with ap_c1:
+            st.caption("포인트 잔액 구간별 딜러수")
+            df_bucket = get_adpoint_bucket()
+            BUCKET_ORDER = ["0원", "1~10만원 미만", "10~50만원 미만", "50~100만원 미만", "100만원 이상"]
+            if not df_bucket.empty:
+                st.altair_chart(apply_theme(
+                    alt.Chart(df_bucket).mark_bar(color=BAR_MAIN).encode(
+                        x=alt.X("구간:N", sort=BUCKET_ORDER, title=None),
+                        y=alt.Y("딜러수:Q", title="딜러수"),
+                        tooltip=[alt.Tooltip("구간:N"),
+                                 alt.Tooltip("딜러수:Q", format=","),
+                                 alt.Tooltip("포인트합계:Q", format=",", title="합계(원)")]
+                    ).properties(height=240, background=CHART_BG)
+                ), use_container_width=True)
+
+        with ap_c2:
+            st.caption("G속성별 포인트 합계")
+            df_apg = get_adpoint_g()
+            G5 = ["G1(수입)", "G2(국산)", "G3(중고차)", "G4(보험설계)", "G5(에이전시)"]
+            df_apg_f = df_apg[df_apg["G속성"].isin(G5)]
+            if not df_apg_f.empty:
+                st.altair_chart(apply_theme(
+                    alt.Chart(df_apg_f).mark_bar(color="#f4a261").encode(
+                        x=alt.X("G속성:N", sort=G5, title=None),
+                        y=alt.Y("포인트합계:Q", title="포인트 합계(원)",
+                                axis=alt.Axis(format=",.0f")),
+                        tooltip=[alt.Tooltip("G속성:N"),
+                                 alt.Tooltip("딜러수:Q", format=","),
+                                 alt.Tooltip("포인트합계:Q", format=","),
+                                 alt.Tooltip("보유수:Q", format=","),
+                                 alt.Tooltip("보유자평균:Q", format=",")]
+                    ).properties(height=240, background=CHART_BG)
+                ), use_container_width=True)
+
+        st.caption("매니저별 포인트 현황")
+        df_apm = get_adpoint_mgr()
+        if not df_apm.empty:
+            df_apm_disp = df_apm.copy()
+            df_apm_disp["포인트합계"] = df_apm_disp["포인트합계"].apply(lambda x: f"{int(x):,}")
+            df_apm_disp["보유자평균"] = df_apm_disp["보유자평균"].apply(
+                lambda x: f"{int(x):,}" if pd.notna(x) and x else "-"
+            )
+            st.dataframe(df_apm_disp, use_container_width=True, hide_index=True)
+
+        st.caption("G속성별 포인트 현황 상세")
+        df_apg_disp = get_adpoint_g().copy()
+        df_apg_disp["포인트합계"] = df_apg_disp["포인트합계"].apply(lambda x: f"{int(x):,}")
+        df_apg_disp["보유자평균"] = df_apg_disp["보유자평균"].apply(
+            lambda x: f"{int(x):,}" if pd.notna(x) and x else "-"
+        )
+        st.dataframe(df_apg_disp, use_container_width=True, hide_index=True)
+
+    except Exception as e:
+        st.warning(f"광고비 포인트 조회 오류: {e}")
+
 
 # ═══════════════════════════════════════════════════════════════
 # TAB 2 — 보험사별 현황
