@@ -2389,8 +2389,8 @@ with tab7:
                 /* 가입보험사 */
                 COALESCE(ca.JOIN_INSURER_CODE, '-')                                AS "가입보험사",
 
-                /* 가입경로: CHANNEL_PATH (INBOUND=TM/CS, DEALER_APP=딜러앱 등) */
-                COALESCE(ca.CHANNEL_PATH, '-')                                     AS "가입경로",
+                /* 가입경로: SUBSCRIPTION_TYPE (CM/TM 등) */
+                COALESCE(ca.SUBSCRIPTION_TYPE, '-')                                AS "가입경로",
 
                 /* 만기월 — counsel_application.INSURANCE_END_DT (새 보험 만기일) */
                 COALESCE(TO_CHAR(ca.INSURANCE_END_DT, 'YYYY-MM'), '-')            AS "만기월",
