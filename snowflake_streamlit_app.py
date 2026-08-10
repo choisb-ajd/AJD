@@ -925,12 +925,15 @@ with tab2:
     </div>
     """, unsafe_allow_html=True)
 
-    bi1, bi2, bi3 = st.columns(3)
+    bi1, bi2, bi3, bi4 = st.columns(4)
     with bi1: ins_from  = st.date_input("시작일", value=date(today.year, 1, 1), key="ins_from")
     with bi2: ins_to    = st.date_input("종료일", value=today, key="ins_to")
     with bi3: ins_mgr   = st.selectbox("담당매니저", ["전체"] + MANAGER_LIST, key="ins_mgr")
+    with bi4: ins_sub   = st.selectbox("가입경로", ["전체", "CM", "TM", "오프라인"], key="ins_sub")
 
     ins_mgr_f = "" if ins_mgr == "전체" else f"AND m.NAME = '{ins_mgr}'"
+    _sub_map  = {"CM": "CM", "TM": "TM", "오프라인": "OFFLINE"}
+    ins_sub_f = "" if ins_sub == "전체" else f"AND ca.SUBSCRIPTION_TYPE = '{_sub_map[ins_sub]}'"
 
     # 당월 KPI
     st.markdown('<div class="section-title">당월 보험사별 현황</div>', unsafe_allow_html=True)
@@ -988,7 +991,7 @@ with tab2:
     st.markdown('<div class="section-title">월별 보험사별 원수보험료 추이</div>', unsafe_allow_html=True)
 
     @st.cache_data(ttl=300)
-    def get_ins_trend(d_from, d_to, mgr_f):
+    def get_ins_trend(d_from, d_to, mgr_f, sub_f):
         df = session.sql(f"""
             SELECT
                 TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM') AS "월",
@@ -1005,13 +1008,13 @@ with tab2:
               AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
               AND ca.JOIN_COMPLETED_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
               AND (m.NAME IS NULL OR m.NAME NOT LIKE '%테스트%')
-              {mgr_f}
+              {mgr_f} {sub_f}
             GROUP BY 1, 2 ORDER BY 1 DESC, 3 DESC NULLS LAST
         """).to_pandas()
         df.columns = ["월", "보험사", "원수보험료", "건수"]
         return df
 
-    df_it = get_ins_trend(ins_from, ins_to, ins_mgr_f)
+    df_it = get_ins_trend(ins_from, ins_to, ins_mgr_f, ins_sub_f)
     if not df_it.empty:
         order_it = sorted(df_it["월"].unique(), reverse=True)
         st.altair_chart(apply_theme(
@@ -1033,7 +1036,7 @@ with tab2:
     pv_view = st.radio("지표", ["원수보험료", "건수"], horizontal=True, key="ins_pv")
 
     @st.cache_data(ttl=300)
-    def get_ins_pivot():
+    def get_ins_pivot(sub_f):
         df = session.sql(f"""
             SELECT
                 TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM') AS "월",
@@ -1049,12 +1052,13 @@ with tab2:
               AND ca.JOIN_COMPLETED_AT IS NOT NULL
               AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
               AND ca.JOIN_COMPLETED_AT >= DATEADD('MONTH', -6, DATE_TRUNC('MONTH', CURRENT_DATE))
+              {sub_f}
             GROUP BY 1, 2, 3 ORDER BY 1 DESC, 2, 3
         """).to_pandas()
         df.columns = ["월", "보험사", "채널", "원수보험료", "건수"]
         return df
 
-    df_ipv = get_ins_pivot()
+    df_ipv = get_ins_pivot(ins_sub_f)
     if not df_ipv.empty:
         pivot = df_ipv.pivot_table(
             index=["보험사", "채널"], columns="월",
@@ -1109,6 +1113,113 @@ with tab2:
                          alt.Tooltip("건수:Q", format=",")]
             ).properties(height=300, background=CHART_BG)
         ), use_container_width=True)
+    else:
+        st.info("데이터 없음")
+
+    # ── 가입경로(CM/TM/오프라인)별 보험사 실적 ────
+    st.markdown('<div class="section-title">가입경로(CM/TM/오프라인)별 보험사 실적</div>',
+                unsafe_allow_html=True)
+
+    SUB_LABEL = {"CM": "CM", "TM": "TM", "OFFLINE": "오프라인"}
+
+    @st.cache_data(ttl=300)
+    def get_sub_ins(d_from, d_to, mgr_f):
+        df = session.sql(f"""
+            SELECT
+                CASE ca.SUBSCRIPTION_TYPE
+                    WHEN 'CM'      THEN 'CM'
+                    WHEN 'TM'      THEN 'TM'
+                    WHEN 'OFFLINE' THEN '오프라인'
+                    ELSE COALESCE(ca.SUBSCRIPTION_TYPE, '미분류')
+                END                                        AS "가입경로",
+                COALESCE(ca.JOIN_INSURER_CODE, '미분류')   AS "보험사",
+                TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM')  AS "월",
+                SUM(cv.CONTRACT_AMOUNT)                    AS "원수보험료",
+                COUNT(*)                                   AS "건수"
+            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
+            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
+                ON ca.COUNSEL_ID = cv.COUNSEL_ID
+                AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
+            LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON ca.COUNSEL_MANAGER_ID = m.ID
+            WHERE ca.COUNSEL_STATUS IN ('JOIN_COMPLETED', 'COMPARISON_COMPLETED')
+              AND ca.JOIN_COMPLETED_AT IS NOT NULL
+              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
+              AND ca.JOIN_COMPLETED_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
+              AND (m.NAME IS NULL OR m.NAME NOT LIKE '%테스트%')
+              {mgr_f}
+            GROUP BY 1, 2, 3
+            ORDER BY 1, 2, 3 DESC
+        """).to_pandas()
+        df.columns = ["가입경로", "보험사", "월", "원수보험료", "건수"]
+        return df
+
+    df_sub = get_sub_ins(ins_from, ins_to, ins_mgr_f)
+
+    if not df_sub.empty:
+        sub_metric = st.radio("지표", ["원수보험료", "건수"], horizontal=True, key="sub_metric")
+
+        # ① 가입경로 × 보험사 합산 표
+        st.caption("가입경로 × 보험사 합산")
+        df_sub_agg = df_sub.groupby(["가입경로", "보험사"])[["원수보험료", "건수"]].sum().reset_index()
+        pv_sub = df_sub_agg.pivot_table(
+            index="보험사", columns="가입경로",
+            values=sub_metric, aggfunc="sum", fill_value=0
+        ).reset_index()
+        sub_cols = [c for c in ["CM", "TM", "오프라인"] if c in pv_sub.columns]
+        pv_sub["합계"] = pv_sub[sub_cols].sum(axis=1)
+        pv_sub = pv_sub[["보험사"] + sub_cols + ["합계"]].sort_values("합계", ascending=False).reset_index(drop=True)
+        fmt_sub = (lambda x: f"{int(x):,}") if sub_metric == "원수보험료" else (lambda x: f"{int(x):,}건")
+        for c in sub_cols + ["합계"]:
+            pv_sub[c] = pv_sub[c].apply(fmt_sub)
+        st.dataframe(pv_sub, use_container_width=True, hide_index=True)
+
+        # ② 차트: 가입경로별 보험사 누적 막대
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            st.caption(f"보험사별 가입경로 {sub_metric}")
+            chart_sub = alt.Chart(df_sub_agg).mark_bar().encode(
+                x=alt.X("보험사:N", sort="-y", title=None),
+                y=alt.Y(f"{sub_metric}:Q", title=sub_metric,
+                        axis=alt.Axis(format=",.0f" if sub_metric == "원수보험료" else ",")),
+                color=alt.Color("가입경로:N",
+                                scale=alt.Scale(domain=["CM","TM","오프라인"],
+                                                range=["#4c78a8","#f4a261","#5ba85a"]),
+                                legend=alt.Legend(title="가입경로")),
+                tooltip=["보험사", "가입경로",
+                         alt.Tooltip(f"{sub_metric}:Q", format=",")],
+            ).properties(height=300, background=CHART_BG)
+            st.altair_chart(apply_theme(chart_sub), use_container_width=True)
+
+        with sc2:
+            st.caption(f"월별 가입경로 {sub_metric} 추이")
+            df_sub_m = df_sub.groupby(["월", "가입경로"])[sub_metric].sum().reset_index()
+            order_sub_m = sorted(df_sub_m["월"].unique(), reverse=True)
+            chart_sub_m = alt.Chart(df_sub_m).mark_line(point=True).encode(
+                x=alt.X("월:N", sort=order_sub_m, title=None,
+                        axis=alt.Axis(labelAngle=-45)),
+                y=alt.Y(f"{sub_metric}:Q", title=sub_metric,
+                        axis=alt.Axis(format=",.0f" if sub_metric == "원수보험료" else ",")),
+                color=alt.Color("가입경로:N",
+                                scale=alt.Scale(domain=["CM","TM","오프라인"],
+                                                range=["#4c78a8","#f4a261","#5ba85a"]),
+                                legend=alt.Legend(title="가입경로")),
+                tooltip=["월", "가입경로",
+                         alt.Tooltip(f"{sub_metric}:Q", format=",")],
+            ).properties(height=300, background=CHART_BG)
+            st.altair_chart(apply_theme(chart_sub_m), use_container_width=True)
+
+        # ③ 월별 × 가입경로 × 보험사 상세 피벗
+        st.caption("월별 × 가입경로 × 보험사 상세")
+        pv_sub2 = df_sub.pivot_table(
+            index=["월", "가입경로"], columns="보험사",
+            values=sub_metric, aggfunc="sum", fill_value=0
+        ).reset_index()
+        ins_cols2 = [c for c in pv_sub2.columns if c not in ["월", "가입경로"]]
+        pv_sub2["합계"] = pv_sub2[ins_cols2].sum(axis=1)
+        pv_sub2 = pv_sub2.sort_values(["월", "가입경로"], ascending=[False, True]).reset_index(drop=True)
+        for c in ins_cols2 + ["합계"]:
+            pv_sub2[c] = pv_sub2[c].apply(fmt_sub)
+        st.dataframe(pv_sub2, use_container_width=True, hide_index=True)
     else:
         st.info("데이터 없음")
 
