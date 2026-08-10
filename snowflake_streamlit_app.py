@@ -909,6 +909,234 @@ with tab1:
                     mime="text/csv", key=f"dl_{cat_num}"
                 )
 
+    # ── 앱 가입월별 체결 전환 분석 (코호트) ─────────
+    st.markdown('<div class="section-title">앱 가입월별 체결 전환 분석</div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div class="criteria-box">
+    📌 <b>분석 기준</b><br>
+    • 선택한 월에 앱 가입한 딜러(USERS.CREATED_AT 기준)를 코호트로 설정<br>
+    • 해당 딜러들의 상담건 중 COUNSEL_STATUS = 'JOIN_COMPLETED' 전환 현황 집계<br>
+    • 전환율 = 체결 발생 딜러수 / 해당월 가입 딜러수
+    </div>
+    """, unsafe_allow_html=True)
+
+    coh1, coh2, coh3 = st.columns(3)
+    with coh1:
+        cohort_months = []
+        _cd = today.replace(day=1)
+        for _ in range(24):
+            cohort_months.append(_cd.strftime("%Y-%m"))
+            _cd = (_cd - timedelta(days=1)).replace(day=1)
+        sel_cohort = st.selectbox("앱 가입월 선택", cohort_months, key="sel_cohort")
+    with coh2:
+        coh_mgr = st.selectbox("담당매니저", ["전체"] + MANAGER_LIST, key="coh_mgr")
+    with coh3:
+        coh_g = st.selectbox("G속성", ["전체","G1(수입)","G2(국산)","G3(중고차)","G4(보험설계)","G5(에이전시)"], key="coh_g")
+
+    coh_mgr_f = "" if coh_mgr == "전체" else f"AND m.NAME = '{coh_mgr}'"
+    coh_g_f   = "" if coh_g  == "전체" else f"AND ({G_ATTR_EXPR}) = '{coh_g}'"
+
+    @st.cache_data(ttl=300)
+    def get_cohort_kpi(cohort_ym, mgr_f, g_f):
+        r = session.sql(f"""
+            WITH cohort AS (
+                SELECT
+                    u.ID,
+                    u.USER_NAME,
+                    u.CREATED_AT::DATE AS reg_date,
+                    {G_ATTR_EXPR}      AS g_attr,
+                    m.NAME             AS manager_name
+                FROM AJDCAR_PROD.PUBLIC.USERS u
+                LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON u.MANAGER_ID = m.ID
+                WHERE TO_CHAR(u.CREATED_AT, 'YYYY-MM') = '{cohort_ym}'
+                  AND u.USER_NAME NOT LIKE '%테스트%'
+                  AND (u.IS_DELETED = FALSE OR u.IS_DELETED IS NULL)
+                  AND u.IS_ASSOCIATE = 0
+                  {mgr_f} {g_f}
+            ),
+            joined AS (
+                SELECT ca.USER_ID, COUNT(*) AS join_cnt
+                FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
+                WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
+                  AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
+                  AND ca.USER_ID IN (SELECT ID FROM cohort)
+                GROUP BY 1
+            )
+            SELECT
+                COUNT(DISTINCT c.ID)                                     AS "코호트딜러수",
+                COUNT(DISTINCT CASE WHEN j.join_cnt > 0 THEN c.ID END)  AS "체결전환딜러수",
+                COALESCE(SUM(j.join_cnt), 0)                            AS "총체결건수",
+                ROUND(COUNT(DISTINCT CASE WHEN j.join_cnt > 0 THEN c.ID END)
+                      / NULLIF(COUNT(DISTINCT c.ID), 0) * 100, 1)       AS "전환율"
+            FROM cohort c
+            LEFT JOIN joined j ON c.ID = j.USER_ID
+        """).collect()
+        return r[0]
+
+    @st.cache_data(ttl=300)
+    def get_cohort_detail(cohort_ym, mgr_f, g_f):
+        df = session.sql(f"""
+            WITH cohort AS (
+                SELECT
+                    u.ID,
+                    u.USER_ID          AS login_id,
+                    u.USER_NAME,
+                    u.CREATED_AT::DATE AS reg_date,
+                    {G_ATTR_EXPR}      AS g_attr,
+                    COALESCE(u.PRIMARY_AFFILIATION, '-') AS brand,
+                    m.NAME             AS manager_name
+                FROM AJDCAR_PROD.PUBLIC.USERS u
+                LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON u.MANAGER_ID = m.ID
+                WHERE TO_CHAR(u.CREATED_AT, 'YYYY-MM') = '{cohort_ym}'
+                  AND u.USER_NAME NOT LIKE '%테스트%'
+                  AND (u.IS_DELETED = FALSE OR u.IS_DELETED IS NULL)
+                  AND u.IS_ASSOCIATE = 0
+                  {mgr_f} {g_f}
+            ),
+            joined AS (
+                SELECT
+                    ca.USER_ID,
+                    COUNT(*)                        AS join_cnt,
+                    MIN(ca.JOIN_COMPLETED_AT::DATE) AS first_join,
+                    MAX(ca.JOIN_COMPLETED_AT::DATE) AS last_join,
+                    SUM(cv.CONTRACT_AMOUNT)         AS total_premium
+                FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
+                LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
+                    ON ca.COUNSEL_ID = cv.COUNSEL_ID
+                    AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
+                WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
+                  AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
+                  AND ca.USER_ID IN (SELECT ID FROM cohort)
+                GROUP BY 1
+            )
+            SELECT
+                c.login_id                               AS "회원ID",
+                c.USER_NAME                              AS "딜러명",
+                c.manager_name                           AS "담당매니저",
+                c.g_attr                                 AS "G속성",
+                c.brand                                  AS "브랜드",
+                c.reg_date                               AS "앱가입일",
+                COALESCE(j.join_cnt, 0)                 AS "체결건수",
+                j.first_join                             AS "첫체결일",
+                j.last_join                              AS "마지막체결일",
+                COALESCE(j.total_premium, 0)            AS "누적원수보험료",
+                CASE WHEN j.join_cnt > 0 THEN '전환'
+                     ELSE '미전환' END                   AS "전환여부"
+            FROM cohort c
+            LEFT JOIN joined j ON c.ID = j.USER_ID
+            ORDER BY j.join_cnt DESC NULLS LAST, c.reg_date
+        """).to_pandas()
+        df.columns = ["회원ID","딜러명","담당매니저","G속성","브랜드","앱가입일",
+                      "체결건수","첫체결일","마지막체결일","누적원수보험료","전환여부"]
+        return df
+
+    @st.cache_data(ttl=300)
+    def get_cohort_monthly_conv(cohort_ym, mgr_f, g_f):
+        df = session.sql(f"""
+            WITH cohort AS (
+                SELECT u.ID
+                FROM AJDCAR_PROD.PUBLIC.USERS u
+                LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON u.MANAGER_ID = m.ID
+                WHERE TO_CHAR(u.CREATED_AT, 'YYYY-MM') = '{cohort_ym}'
+                  AND u.USER_NAME NOT LIKE '%테스트%'
+                  AND (u.IS_DELETED = FALSE OR u.IS_DELETED IS NULL)
+                  AND u.IS_ASSOCIATE = 0
+                  {mgr_f} {g_f}
+            )
+            SELECT
+                TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM') AS "체결월",
+                COUNT(DISTINCT ca.USER_ID)                AS "체결딜러수",
+                COUNT(*)                                  AS "체결건수",
+                SUM(cv.CONTRACT_AMOUNT)                   AS "원수보험료"
+            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
+            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
+                ON ca.COUNSEL_ID = cv.COUNSEL_ID
+                AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
+            WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
+              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
+              AND ca.USER_ID IN (SELECT ID FROM cohort)
+              AND ca.JOIN_COMPLETED_AT IS NOT NULL
+            GROUP BY 1 ORDER BY 1
+        """).to_pandas()
+        df.columns = ["체결월", "체결딜러수", "체결건수", "원수보험료"]
+        return df
+
+    try:
+        coh_kpi = get_cohort_kpi(sel_cohort, coh_mgr_f, coh_g_f)
+
+        ck1, ck2, ck3, ck4 = st.columns(4)
+        with ck1:
+            st.markdown(kpi_card("코호트 딜러수", f"{coh_kpi['코호트딜러수'] or 0:,}명",
+                                 f"{sel_cohort} 앱 가입"), unsafe_allow_html=True)
+        with ck2:
+            st.markdown(kpi_card("체결 전환 딜러수", f"{coh_kpi['체결전환딜러수'] or 0:,}명"),
+                        unsafe_allow_html=True)
+        with ck3:
+            st.markdown(kpi_card("전환율", f"{coh_kpi['전환율'] or 0:.1f}%",
+                                 "체결 1건 이상 발생 기준"), unsafe_allow_html=True)
+        with ck4:
+            st.markdown(kpi_card("총 체결건수", f"{coh_kpi['총체결건수'] or 0:,}건"),
+                        unsafe_allow_html=True)
+
+        df_coh = get_cohort_detail(sel_cohort, coh_mgr_f, coh_g_f)
+
+        if not df_coh.empty:
+            # 체결건수 구간 분포
+            BUCKET_MAP = lambda x: (
+                "0건(미전환)" if x == 0 else
+                "1건" if x == 1 else
+                "2~5건" if x <= 5 else
+                "6~10건" if x <= 10 else
+                "11건 이상"
+            )
+            BUCKET_ORDER_C = ["0건(미전환)", "1건", "2~5건", "6~10건", "11건 이상"]
+            df_coh["구간"] = df_coh["체결건수"].apply(BUCKET_MAP)
+            df_bucket_c = df_coh.groupby("구간").size().reset_index(name="딜러수")
+
+            cv1, cv2 = st.columns(2)
+            with cv1:
+                st.caption("체결건수 구간별 딜러수")
+                st.altair_chart(apply_theme(
+                    alt.Chart(df_bucket_c).mark_bar(color=BAR_MAIN).encode(
+                        x=alt.X("구간:N", sort=BUCKET_ORDER_C, title=None),
+                        y=alt.Y("딜러수:Q", title="딜러수"),
+                        tooltip=[alt.Tooltip("구간:N"), alt.Tooltip("딜러수:Q", format=",")]
+                    ).properties(height=220, background=CHART_BG)
+                ), use_container_width=True)
+
+            with cv2:
+                st.caption("월별 체결 추이 (해당 코호트)")
+                df_coh_m = get_cohort_monthly_conv(sel_cohort, coh_mgr_f, coh_g_f)
+                if not df_coh_m.empty:
+                    order_cm2 = list(df_coh_m["체결월"])
+                    st.altair_chart(apply_theme(
+                        alt.Chart(df_coh_m).mark_bar(color="#5ba85a").encode(
+                            x=alt.X("체결월:N", sort=order_cm2, title=None,
+                                    axis=alt.Axis(labelAngle=-45)),
+                            y=alt.Y("체결건수:Q", title="체결건수"),
+                            tooltip=[alt.Tooltip("체결월:N"),
+                                     alt.Tooltip("체결딜러수:Q", format=",", title="체결딜러수"),
+                                     alt.Tooltip("체결건수:Q", format=","),
+                                     alt.Tooltip("원수보험료:Q", format=",")]
+                        ).properties(height=220, background=CHART_BG)
+                    ), use_container_width=True)
+
+            # 상세 테이블
+            st.caption(f"{sel_cohort} 가입 딜러 전체 목록 ({len(df_coh):,}명)")
+            df_coh_disp = df_coh.drop(columns=["구간"]).copy()
+            df_coh_disp["누적원수보험료"] = df_coh_disp["누적원수보험료"].apply(
+                lambda x: f"{int(x):,}" if x else "-"
+            )
+            st.dataframe(df_coh_disp, use_container_width=True, hide_index=True, height=400)
+            st.download_button(
+                "⬇ CSV 다운로드",
+                df_coh_disp.to_csv(index=False, encoding="utf-8-sig"),
+                f"cohort_{sel_cohort}.csv", "text/csv", key="coh_dl"
+            )
+
+    except Exception as e:
+        st.warning(f"코호트 분석 조회 오류: {e}")
+
     # ── 광고비 포인트 현황 ────────────────────────
     st.markdown('<div class="section-title">광고비 포인트 현황 (USERS.AD_POINT 기준)</div>',
                 unsafe_allow_html=True)
