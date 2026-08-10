@@ -2377,22 +2377,28 @@ with tab7:
                 /* 영업채널 */
                 {CH_EXPR}                                                          AS "영업채널",
 
-                /* 고객 정보 */
-                COALESCE(cv.CUSTOMER_NAME, '-')                                    AS "고객명",
-                COALESCE(cv.CAR_NUMBER, '-')                                       AS "차량번호",
+                /* 고객 정보 — CUSTOMER 테이블 JOIN */
+                COALESCE(cust.CUSTOMER_NAME, '-')                                  AS "고객명",
+
+                /* 차량번호 — counsel_vehicle.LICENSE_PLATE_NUMBER */
+                COALESCE(cv.LICENSE_PLATE_NUMBER, '-')                             AS "차량번호",
+
+                /* 보험료 */
                 cv.CONTRACT_AMOUNT                                                 AS "보험료",
+
+                /* 가입보험사 */
                 COALESCE(ca.JOIN_INSURER_CODE, '-')                                AS "가입보험사",
 
-                /* 가입경로: CHANNEL_PATH 원값 그대로 표기 */
+                /* 가입경로: CHANNEL_PATH (INBOUND=TM/CS, DEALER_APP=딜러앱 등) */
                 COALESCE(ca.CHANNEL_PATH, '-')                                     AS "가입경로",
 
-                /* 만기월 */
-                COALESCE(TO_CHAR(cv.EXPIRY_DATE, 'YYYY-MM'), '-')                 AS "만기월",
+                /* 만기월 — counsel_application.INSURANCE_END_DT (새 보험 만기일) */
+                COALESCE(TO_CHAR(ca.INSURANCE_END_DT, 'YYYY-MM'), '-')            AS "만기월",
 
-                /* 영업용 여부 */
+                /* 영업용 여부 — counsel_application.VEHICLE_USAGE_CODE */
                 CASE
-                    WHEN cv.CAR_TYPE = 'COMMERCIAL' THEN '영업용'
-                    WHEN cv.CAR_TYPE IS NULL        THEN '-'
+                    WHEN ca.VEHICLE_USAGE_CODE IS NULL THEN '-'
+                    WHEN ca.VEHICLE_USAGE_CODE IN ('COMMERCIAL','BUSINESS') THEN '영업용'
                     ELSE '비영업용'
                 END                                                                AS "영업용여부",
 
@@ -2403,8 +2409,8 @@ with tab7:
                 /* 매니저 */
                 COALESCE(m.NAME, '미배정')                                         AS "매니저",
 
-                /* 주유권 — Snowflake 미연동, 추후 반영 */
-                NULL                                                               AS "주유권",
+                /* 주유권 — GIFT 테이블 JOIN (ca.GIFT_ID → gift.GIFT_NAME) */
+                COALESCE(g.GIFT_NAME, '-')                                         AS "주유권",
 
                 /* 회원 정보 */
                 u.USER_NAME                                                        AS "회원명",
@@ -2419,6 +2425,11 @@ with tab7:
             LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
                 ON ca.COUNSEL_ID = cv.COUNSEL_ID
                 AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
+            LEFT JOIN AJDCAR_PROD.PUBLIC.CUSTOMER cust
+                ON ca.CUSTOMER_ID = cust.CUSTOMER_ID
+                AND (cust.IS_DELETED = FALSE OR cust.IS_DELETED IS NULL)
+            LEFT JOIN AJDCAR_PROD.PUBLIC.GIFT g
+                ON ca.GIFT_ID = g.GIFT_ID
             LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u
                 ON ca.USER_ID = u.ID
             LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m
