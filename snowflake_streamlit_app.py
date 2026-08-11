@@ -3005,7 +3005,7 @@ with tab8:
     # 실제 Snowflake 스키마에 맞게 조정 필요
     # 현재 USERS 테이블 기준: BRAND (브랜드), BRANCH_NAME (지점명)
     b2b_where_parts = " OR ".join(
-        f"(u.BRAND = '{b1}' AND u.BRANCH_NAME = '{b2}')"
+        f"(u.PRIMARY_AFFILIATION = '{b1}' AND u.SECONDARY_AFFILIATION = '{b2}')"
         for b1, b2 in B2B_GROUPS
     )
     B2B_WHERE = f"({b2b_where_parts})"
@@ -3032,8 +3032,8 @@ with tab8:
                 u.USER_ID                      AS USER_ID,
                 u.USER_NAME                    AS USER_NAME,
                 u.LOGIN_ID                     AS LOGIN_ID,
-                u.BRAND                        AS BRAND,
-                u.BRANCH_NAME                  AS BRANCH_NAME,
+                u.PRIMARY_AFFILIATION           AS BRAND,
+                u.SECONDARY_AFFILIATION        AS BRANCH_NAME,
                 u.CREATED_AT::DATE             AS CREATED_DT,
                 j.dt_first                     AS DT_FIRST,
                 j.dt_last                      AS DT_LAST,
@@ -3044,7 +3044,7 @@ with tab8:
             LEFT JOIN joined j ON j.uid = u.USER_ID
             WHERE {B2B_WHERE}
               AND {USER_FILTER}
-            ORDER BY u.BRAND, u.BRANCH_NAME, u.USER_NAME
+            ORDER BY u.PRIMARY_AFFILIATION, u.SECONDARY_AFFILIATION, u.USER_NAME
         """).to_pandas()
         df.rename(columns={
             "USER_ID":    "회원ID",
