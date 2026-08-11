@@ -3026,8 +3026,11 @@ with tab8:
             WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
               AND ca.JOIN_COMPLETED_AT IS NOT NULL
               AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
+              AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
               AND ({b2b_where_parts})
-              AND {USER_FILTER}
+              AND u.IS_ASSOCIATE = 0
+              AND u.USER_NAME NOT LIKE '%테스트%'
+              AND (u.IS_DELETED = FALSE OR u.IS_DELETED IS NULL)
             GROUP BY 1, 2, 3
             ORDER BY 1, 2, 3
         """).to_pandas()
