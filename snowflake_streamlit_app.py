@@ -3017,12 +3017,13 @@ with tab8:
                 SELECT
                     ca.USER_ID                                                         AS uid,
                     COUNT(*)                                                           AS cnt_total,
-                    SUM(ca.ORIGINAL_INSURANCE_FEE)                                    AS fee_total,
+                    SUM(cv.CONTRACT_AMOUNT)                                            AS fee_total,
                     MIN(ca.JOIN_COMPLETED_AT::DATE)                                   AS dt_first,
                     MAX(ca.JOIN_COMPLETED_AT::DATE)                                   AS dt_last,
                     COUNT(CASE WHEN ca.JOIN_COMPLETED_AT::DATE
                                >= DATEADD('day', -60, CURRENT_DATE()) THEN 1 END)    AS cnt_60d
                 FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
+                LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv ON cv.COUNSEL_APPLICATION_ID = ca.ID
                 WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
                   AND ca.JOIN_COMPLETED_AT IS NOT NULL
                   AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
