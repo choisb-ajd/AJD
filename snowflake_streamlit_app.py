@@ -3011,6 +3011,34 @@ with tab8:
     B2B_WHERE = f"({b2b_where_parts})"
 
     @st.cache_data(ttl=300)
+    def get_b2b_trend():
+        """소속별 월별 체결건수 + 원수보험료 추이"""
+        df = session.sql(f"""
+            SELECT
+                TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM')  AS YM,
+                u.PRIMARY_AFFILIATION                      AS BRAND,
+                u.SECONDARY_AFFILIATION                    AS BRANCH_NAME,
+                COUNT(*)                                   AS CNT,
+                SUM(cv.CONTRACT_AMOUNT)                    AS FEE
+            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
+            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv ON cv.COUNSEL_ID = ca.COUNSEL_ID
+            LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u ON u.ID = ca.USER_ID
+            WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
+              AND ca.JOIN_COMPLETED_AT IS NOT NULL
+              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
+              AND ({b2b_where_parts})
+              AND {USER_FILTER}
+            GROUP BY 1, 2, 3
+            ORDER BY 1, 2, 3
+        """).to_pandas()
+        df.rename(columns={
+            "YM": "체결월", "BRAND": "브랜드", "BRANCH_NAME": "지점명",
+            "CNT": "체결건수", "FEE": "원수보험료",
+        }, inplace=True)
+        df["소속"] = df["브랜드"] + " / " + df["지점명"]
+        return df
+
+    @st.cache_data(ttl=300)
     def get_b2b_list():
         df = session.sql(f"""
             WITH joined AS (
@@ -3135,6 +3163,64 @@ with tab8:
             )
         )
         st.altair_chart(chart_bar, use_container_width=True)
+
+        # ── 월별 실적 추이 ─────────────────────────────────────
+        st.markdown('<div class="section-title">소속별 월별 실적 추이</div>', unsafe_allow_html=True)
+
+        try:
+            df_trend = get_b2b_trend()
+        except Exception as e:
+            st.warning(f"추이 데이터 조회 오류: {e}")
+            df_trend = pd.DataFrame()
+
+        if not df_trend.empty:
+            b8_metric = st.radio(
+                "지표 선택", ["체결건수", "원수보험료"],
+                horizontal=True, key="b8_metric"
+            )
+            y_col   = b8_metric
+            y_fmt   = ",.0f" if b8_metric == "원수보험료" else ",.0f"
+            y_title = f"{b8_metric}{'(원)' if b8_metric == '원수보험료' else '(건)'}"
+
+            # 라인 차트: 소속별 월별 추이
+            chart_trend = apply_theme(
+                alt.Chart(df_trend)
+                .mark_line(point=True, strokeWidth=2)
+                .encode(
+                    x=alt.X("체결월:N", title="체결월", axis=alt.Axis(labelAngle=-45)),
+                    y=alt.Y(f"{y_col}:Q", title=y_title,
+                            axis=alt.Axis(format=",.0f")),
+                    color=alt.Color("소속:N", legend=alt.Legend(title="소속")),
+                    tooltip=["체결월:N", "소속:N",
+                             alt.Tooltip(f"{y_col}:Q", format=y_fmt)],
+                )
+            )
+            st.altair_chart(chart_trend, use_container_width=True)
+
+            # 묶음 막대 차트: 월별 × 소속
+            st.markdown('<div class="chart-caption">월별 소속 비교 (묶음 막대)</div>', unsafe_allow_html=True)
+            chart_grouped = apply_theme(
+                alt.Chart(df_trend)
+                .mark_bar()
+                .encode(
+                    x=alt.X("체결월:N", title="체결월", axis=alt.Axis(labelAngle=-45)),
+                    y=alt.Y(f"{y_col}:Q", title=y_title,
+                            axis=alt.Axis(format=",.0f")),
+                    color=alt.Color("소속:N", legend=alt.Legend(title="소속")),
+                    xOffset=alt.XOffset("소속:N"),
+                    tooltip=["체결월:N", "소속:N",
+                             alt.Tooltip(f"{y_col}:Q", format=y_fmt)],
+                )
+            )
+            st.altair_chart(chart_grouped, use_container_width=True)
+
+            # 피벗 테이블: 월 × 소속
+            st.markdown('<div class="chart-caption">월별 소속 피벗</div>', unsafe_allow_html=True)
+            df_pivot = df_trend.pivot_table(
+                index="체결월", columns="소속", values=y_col,
+                aggfunc="sum", fill_value=0
+            ).reset_index()
+            st.dataframe(df_pivot, use_container_width=True, hide_index=True)
 
         # ── 딜러 상세 테이블 ───────────────────────────────────
         st.markdown('<div class="section-title">딜러 상세 목록</div>', unsafe_allow_html=True)
