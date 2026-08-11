@@ -220,9 +220,6 @@ export default function DashboardPage({ role, name, adminSheetUrl }) {
   const [bulkManagerModal, setBulkManagerModal] = useState(false);
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkResult, setBulkResult] = useState(null);
-  const [syncingManagers, setSyncingManagers] = useState(false);
-  const [syncManagersMsg, setSyncManagersMsg] = useState(null);
-
   // silent=true면 화면에 "불러오는 중..." 스피너를 띄우지 않고 조용히 최신 데이터로 교체합니다.
   // 구글 시트에서 직접 수정한 내용도 이 폴링을 통해 자동으로 화면에 반영됩니다.
   // ETag를 보내 데이터가 바뀌지 않았으면(304) 상태 업데이트를 건너뜁니다.
@@ -414,24 +411,6 @@ export default function DashboardPage({ role, name, adminSheetUrl }) {
     }
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
-  }
-
-  async function handleSyncManagers() {
-    setSyncingManagers(true);
-    setSyncManagersMsg(null);
-    try {
-      const res = await fetch('/api/admin/sync-managers', { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) {
-        setSyncManagersMsg({ type: 'err', text: data.error || '동기화 실패' });
-      } else {
-        setSyncManagersMsg({ type: 'ok', text: `동기화 완료 (삭제 ${data.deletedRows}행, 추가 ${data.appendedRows}행, 업데이트 ${data.updatedFields}건)` });
-      }
-    } catch (e) {
-      setSyncManagersMsg({ type: 'err', text: '네트워크 오류' });
-    } finally {
-      setSyncingManagers(false);
-    }
   }
 
   function exportCsv() {
@@ -643,21 +622,9 @@ export default function DashboardPage({ role, name, adminSheetUrl }) {
             <h1>회원 관리</h1>
             <div className="count">
               검색된 회원 수: {filtered.length.toLocaleString()}명
-              {lastSynced && ` · 마지막 동기화: ${lastSynced.toLocaleTimeString('ko-KR')}`}
+              {lastSynced && ` · 마지막 로드: ${lastSynced.toLocaleTimeString('ko-KR')}`}
             </div>
           </div>
-          {isAdmin && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {syncManagersMsg && (
-                <span style={{ fontSize: 12, color: syncManagersMsg.type === 'ok' ? 'var(--green)' : 'var(--red)' }}>
-                  {syncManagersMsg.text}
-                </span>
-              )}
-              <button className="btn-secondary" onClick={handleSyncManagers} disabled={syncingManagers}>
-                {syncingManagers ? '동기화 중...' : '매니저 시트 동기화'}
-              </button>
-            </div>
-          )}
         </div>
 
         <div className="filters-card">
