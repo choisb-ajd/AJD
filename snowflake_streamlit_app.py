@@ -185,7 +185,7 @@ st.markdown("""
 
 # 탭 구성
 # ════════════════════════════════════
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📊 영업현황",
     "🏢 보험사별 현황",
     "❌ 취소건 현황",
@@ -193,6 +193,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "🔍 비견건수",
     "📈 주요지표분석",
     "👤 매니저별 실적",
+    "🤝 상조회(B2B)",
 ])
 
 # ═══════════════════════════════════════════════════════════════
@@ -2975,3 +2976,196 @@ with tab7:
         )
     except Exception as e:
         st.warning(f"Raw 데이터 조회 오류 (컬럼명 확인 필요): {e}")
+
+# ═══════════════════════════════════════════════════════════════
+# TAB 8 — 상조회(B2B) 실적
+# ═══════════════════════════════════════════════════════════════
+with tab8:
+    st.subheader("🤝 상조회(B2B) 딜러 실적")
+
+    st.markdown("""
+    <div class="criteria-box">
+    <b>대상 그룹</b><br>
+    ① 현대 / 하계 &nbsp;&nbsp; ② 현대 / 우이 &nbsp;&nbsp; ③ BMW / 방배 &nbsp;&nbsp;
+    ④ BMW / 자유로 &nbsp;&nbsp; ⑤ BMW / 남양주<br>
+    <b>조건</b>: IS_ASSOCIATE=0, 테스트 계정 제외, 탈퇴회원 제외
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── B2B 대상 필터 ──────────────────────────────────────────
+    B2B_GROUPS = [
+        ("현대", "하계"),
+        ("현대", "우이"),
+        ("BMW", "방배"),
+        ("BMW", "자유로"),
+        ("BMW", "남양주"),
+    ]
+
+    # BRAND_1(1차 소속) / BRANCH_NAME(2차 소속) 컬럼명은
+    # 실제 Snowflake 스키마에 맞게 조정 필요
+    # 현재 USERS 테이블 기준: BRAND (브랜드), BRANCH_NAME (지점명)
+    b2b_where_parts = " OR ".join(
+        f"(u.BRAND = '{b1}' AND u.BRANCH_NAME = '{b2}')"
+        for b1, b2 in B2B_GROUPS
+    )
+    B2B_WHERE = f"({b2b_where_parts})"
+
+    @st.cache_data(ttl=300)
+    def get_b2b_list():
+        df = session.sql(f"""
+            WITH joined AS (
+                SELECT
+                    ca.USER_ID,
+                    COUNT(*)                                    AS 누적계약체결수,
+                    SUM(ca.ORIGINAL_INSURANCE_FEE)              AS 누적총원수보험료,
+                    MIN(ca.JOIN_COMPLETED_AT)::DATE             AS 최초계약완료일,
+                    MAX(ca.JOIN_COMPLETED_AT)::DATE             AS 최근계약완료일,
+                    COUNT(CASE WHEN ca.JOIN_COMPLETED_AT::DATE
+                               >= DATEADD('day', -60, CURRENT_DATE()) THEN 1 END)
+                                                                AS 직전60일계약건수
+                FROM COUNSEL_APPLICATION ca
+                WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
+                  AND ca.JOIN_COMPLETED_AT IS NOT NULL
+                  AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
+                GROUP BY ca.USER_ID
+            )
+            SELECT
+                u.USER_ID                                       AS "회원ID",
+                u.USER_NAME                                     AS "딜러성명",
+                u.LOGIN_ID                                      AS "로그인ID",
+                u.BRAND                                         AS "브랜드",
+                u.BRANCH_NAME                                   AS "지점명",
+                u.CREATED_AT::DATE                              AS "회원가입일",
+                COALESCE(j.최초계약완료일,  NULL)               AS "최초계약완료일",
+                COALESCE(j.최근계약완료일,  NULL)               AS "최근계약완료일",
+                COALESCE(j.누적계약체결수,  0)                  AS "누적계약체결수",
+                COALESCE(j.누적총원수보험료, 0)                 AS "누적총원수보험료",
+                COALESCE(j.직전60일계약건수, 0)                 AS "직전60일계약건수"
+            FROM USERS u
+            LEFT JOIN joined j ON j.USER_ID = u.USER_ID
+            WHERE {B2B_WHERE}
+              AND {USER_FILTER}
+            ORDER BY u.BRAND, u.BRANCH_NAME, u.USER_NAME
+        """).to_pandas()
+        return df
+
+    try:
+        df_b2b = get_b2b_list()
+    except Exception as e:
+        st.error(f"데이터 조회 오류: {e}")
+        df_b2b = pd.DataFrame()
+
+    if df_b2b.empty:
+        st.info("조회된 데이터가 없습니다. 컬럼명(BRAND, BRANCH_NAME)을 확인해주세요.")
+    else:
+        # ── KPI 요약 카드 ──────────────────────────────────────
+        st.markdown('<div class="section-title">전체 요약</div>', unsafe_allow_html=True)
+
+        total_dealers   = len(df_b2b)
+        active_dealers  = int((df_b2b["누적계약체결수"] > 0).sum())
+        total_contracts = int(df_b2b["누적계약체결수"].sum())
+        total_fee       = int(df_b2b["누적총원수보험료"].sum())
+        active_60d      = int((df_b2b["직전60일계약건수"] > 0).sum())
+        contracts_60d   = int(df_b2b["직전60일계약건수"].sum())
+
+        k1, k2, k3, k4, k5, k6 = st.columns(6)
+        def _kpi(col, label, value):
+            col.markdown(
+                f'<div class="kpi-card"><div class="kpi-label">{label}</div>'
+                f'<div class="kpi-value">{value}</div></div>',
+                unsafe_allow_html=True,
+            )
+        _kpi(k1, "총 딜러수",       f"{total_dealers:,}명")
+        _kpi(k2, "체결 딜러수",     f"{active_dealers:,}명")
+        _kpi(k3, "누적 체결건수",   f"{total_contracts:,}건")
+        _kpi(k4, "누적 원수보험료", f"{total_fee:,.0f}원")
+        _kpi(k5, "직전60일 활동 딜러", f"{active_60d:,}명")
+        _kpi(k6, "직전60일 체결건수",  f"{contracts_60d:,}건")
+
+        # ── 그룹별 요약 ────────────────────────────────────────
+        st.markdown('<div class="section-title">그룹별 집계</div>', unsafe_allow_html=True)
+
+        df_grp = (
+            df_b2b
+            .groupby(["브랜드", "지점명"], dropna=False)
+            .agg(
+                딜러수          = ("회원ID",          "count"),
+                체결딜러수      = ("누적계약체결수",   lambda x: (x > 0).sum()),
+                누적체결건수    = ("누적계약체결수",   "sum"),
+                누적원수보험료  = ("누적총원수보험료", "sum"),
+                직전60일건수    = ("직전60일계약건수", "sum"),
+            )
+            .reset_index()
+            .sort_values(["브랜드", "지점명"])
+        )
+        df_grp["누적원수보험료"] = df_grp["누적원수보험료"].apply(lambda x: f"{int(x):,}")
+        st.dataframe(df_grp, use_container_width=True, hide_index=True)
+
+        # ── 차트: 지점별 누적 체결건수 ────────────────────────
+        st.markdown('<div class="section-title">지점별 누적 체결건수</div>', unsafe_allow_html=True)
+
+        df_chart = (
+            df_b2b.groupby(["브랜드", "지점명"])["누적계약체결수"]
+            .sum()
+            .reset_index()
+        )
+        df_chart["지점"] = df_chart["브랜드"] + " / " + df_chart["지점명"]
+
+        chart_bar = apply_theme(
+            alt.Chart(df_chart)
+            .mark_bar()
+            .encode(
+                x=alt.X("지점:N", sort="-y", title="지점"),
+                y=alt.Y("누적계약체결수:Q", title="체결건수"),
+                color=alt.Color("브랜드:N", legend=alt.Legend(title="브랜드")),
+                tooltip=["지점:N", "누적계약체결수:Q"],
+            )
+        )
+        st.altair_chart(chart_bar, use_container_width=True)
+
+        # ── 딜러 상세 테이블 ───────────────────────────────────
+        st.markdown('<div class="section-title">딜러 상세 목록</div>', unsafe_allow_html=True)
+
+        # 브랜드/지점 필터
+        b8c1, b8c2, b8c3 = st.columns([2, 2, 4])
+        with b8c1:
+            brand_opts = ["전체"] + sorted(df_b2b["브랜드"].dropna().unique().tolist())
+            b8_brand = st.selectbox("브랜드", brand_opts, key="b8_brand")
+        with b8c2:
+            if b8_brand == "전체":
+                branch_opts = ["전체"] + sorted(df_b2b["지점명"].dropna().unique().tolist())
+            else:
+                branch_opts = ["전체"] + sorted(
+                    df_b2b[df_b2b["브랜드"] == b8_brand]["지점명"].dropna().unique().tolist()
+                )
+            b8_branch = st.selectbox("지점", branch_opts, key="b8_branch")
+        with b8c3:
+            b8_only_active = st.checkbox("체결 실적 있는 딜러만", value=False, key="b8_active")
+
+        df_disp = df_b2b.copy()
+        if b8_brand  != "전체": df_disp = df_disp[df_disp["브랜드"] == b8_brand]
+        if b8_branch != "전체": df_disp = df_disp[df_disp["지점명"] == b8_branch]
+        if b8_only_active:      df_disp = df_disp[df_disp["누적계약체결수"] > 0]
+
+        df_disp = df_disp.copy()
+        df_disp["누적총원수보험료"] = df_disp["누적총원수보험료"].apply(
+            lambda x: f"{int(x):,}" if pd.notna(x) else "-"
+        )
+
+        col_order = [
+            "브랜드", "지점명", "딜러성명", "로그인ID", "회원ID",
+            "회원가입일", "최초계약완료일", "최근계약완료일",
+            "누적계약체결수", "누적총원수보험료", "직전60일계약건수",
+        ]
+        col_order = [c for c in col_order if c in df_disp.columns]
+
+        st.caption(f"총 {len(df_disp):,}명")
+        st.dataframe(df_disp[col_order], use_container_width=True, hide_index=True, height=500)
+
+        st.download_button(
+            "⬇ B2B 딜러 목록 CSV 다운로드",
+            df_b2b.to_csv(index=False, encoding="utf-8-sig"),
+            "b2b_dealer_list.csv",
+            "text/csv",
+            key="b8_dl",
+        )
