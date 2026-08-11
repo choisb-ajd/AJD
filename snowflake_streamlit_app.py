@@ -3015,14 +3015,13 @@ with tab8:
         df = session.sql(f"""
             WITH joined AS (
                 SELECT
-                    ca.USER_ID,
-                    COUNT(*)                                    AS 누적계약체결수,
-                    SUM(ca.ORIGINAL_INSURANCE_FEE)              AS 누적총원수보험료,
-                    MIN(ca.JOIN_COMPLETED_AT)::DATE             AS 최초계약완료일,
-                    MAX(ca.JOIN_COMPLETED_AT)::DATE             AS 최근계약완료일,
+                    ca.USER_ID                                                         AS uid,
+                    COUNT(*)                                                           AS cnt_total,
+                    SUM(ca.ORIGINAL_INSURANCE_FEE)                                    AS fee_total,
+                    MIN(ca.JOIN_COMPLETED_AT::DATE)                                   AS dt_first,
+                    MAX(ca.JOIN_COMPLETED_AT::DATE)                                   AS dt_last,
                     COUNT(CASE WHEN ca.JOIN_COMPLETED_AT::DATE
-                               >= DATEADD('day', -60, CURRENT_DATE()) THEN 1 END)
-                                                                AS 직전60일계약건수
+                               >= DATEADD('day', -60, CURRENT_DATE()) THEN 1 END)    AS cnt_60d
                 FROM COUNSEL_APPLICATION ca
                 WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
                   AND ca.JOIN_COMPLETED_AT IS NOT NULL
@@ -3030,23 +3029,36 @@ with tab8:
                 GROUP BY ca.USER_ID
             )
             SELECT
-                u.USER_ID                                       AS "회원ID",
-                u.USER_NAME                                     AS "딜러성명",
-                u.LOGIN_ID                                      AS "로그인ID",
-                u.BRAND                                         AS "브랜드",
-                u.BRANCH_NAME                                   AS "지점명",
-                u.CREATED_AT::DATE                              AS "회원가입일",
-                COALESCE(j.최초계약완료일,  NULL)               AS "최초계약완료일",
-                COALESCE(j.최근계약완료일,  NULL)               AS "최근계약완료일",
-                COALESCE(j.누적계약체결수,  0)                  AS "누적계약체결수",
-                COALESCE(j.누적총원수보험료, 0)                 AS "누적총원수보험료",
-                COALESCE(j.직전60일계약건수, 0)                 AS "직전60일계약건수"
+                u.USER_ID                      AS USER_ID,
+                u.USER_NAME                    AS USER_NAME,
+                u.LOGIN_ID                     AS LOGIN_ID,
+                u.BRAND                        AS BRAND,
+                u.BRANCH_NAME                  AS BRANCH_NAME,
+                u.CREATED_AT::DATE             AS CREATED_DT,
+                j.dt_first                     AS DT_FIRST,
+                j.dt_last                      AS DT_LAST,
+                COALESCE(j.cnt_total,  0)      AS CNT_TOTAL,
+                COALESCE(j.fee_total,  0)      AS FEE_TOTAL,
+                COALESCE(j.cnt_60d,    0)      AS CNT_60D
             FROM USERS u
-            LEFT JOIN joined j ON j.USER_ID = u.USER_ID
+            LEFT JOIN joined j ON j.uid = u.USER_ID
             WHERE {B2B_WHERE}
               AND {USER_FILTER}
             ORDER BY u.BRAND, u.BRANCH_NAME, u.USER_NAME
         """).to_pandas()
+        df.rename(columns={
+            "USER_ID":    "회원ID",
+            "USER_NAME":  "딜러성명",
+            "LOGIN_ID":   "로그인ID",
+            "BRAND":      "브랜드",
+            "BRANCH_NAME":"지점명",
+            "CREATED_DT": "회원가입일",
+            "DT_FIRST":   "최초계약완료일",
+            "DT_LAST":    "최근계약완료일",
+            "CNT_TOTAL":  "누적계약체결수",
+            "FEE_TOTAL":  "누적총원수보험료",
+            "CNT_60D":    "직전60일계약건수",
+        }, inplace=True)
         return df
 
     try:
