@@ -3022,7 +3022,7 @@ with tab8:
                     MAX(ca.JOIN_COMPLETED_AT::DATE)                                   AS dt_last,
                     COUNT(CASE WHEN ca.JOIN_COMPLETED_AT::DATE
                                >= DATEADD('day', -60, CURRENT_DATE()) THEN 1 END)    AS cnt_60d
-                FROM COUNSEL_APPLICATION ca
+                FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
                 WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
                   AND ca.JOIN_COMPLETED_AT IS NOT NULL
                   AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
@@ -3040,7 +3040,7 @@ with tab8:
                 COALESCE(j.cnt_total,  0)      AS CNT_TOTAL,
                 COALESCE(j.fee_total,  0)      AS FEE_TOTAL,
                 COALESCE(j.cnt_60d,    0)      AS CNT_60D
-            FROM USERS u
+            FROM AJDCAR_PROD.PUBLIC.USERS u
             LEFT JOIN joined j ON j.uid = u.USER_ID
             WHERE {B2B_WHERE}
               AND {USER_FILTER}
