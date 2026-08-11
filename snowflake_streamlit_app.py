@@ -3023,17 +3023,17 @@ with tab8:
                     COUNT(CASE WHEN ca.JOIN_COMPLETED_AT::DATE
                                >= DATEADD('day', -60, CURRENT_DATE()) THEN 1 END)    AS cnt_60d
                 FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-                LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv ON cv.COUNSEL_APPLICATION_ID = ca.ID
+                LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv ON cv.COUNSEL_ID = ca.COUNSEL_ID
                 WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
                   AND ca.JOIN_COMPLETED_AT IS NOT NULL
                   AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
                 GROUP BY ca.USER_ID
             )
             SELECT
-                u.USER_ID                      AS USER_ID,
+                u.ID                           AS USER_PK,
+                u.USER_ID                      AS LOGIN_ID,
                 u.USER_NAME                    AS USER_NAME,
-                u.LOGIN_ID                     AS LOGIN_ID,
-                u.PRIMARY_AFFILIATION           AS BRAND,
+                u.PRIMARY_AFFILIATION          AS BRAND,
                 u.SECONDARY_AFFILIATION        AS BRANCH_NAME,
                 u.CREATED_AT::DATE             AS CREATED_DT,
                 j.dt_first                     AS DT_FIRST,
@@ -3042,15 +3042,15 @@ with tab8:
                 COALESCE(j.fee_total,  0)      AS FEE_TOTAL,
                 COALESCE(j.cnt_60d,    0)      AS CNT_60D
             FROM AJDCAR_PROD.PUBLIC.USERS u
-            LEFT JOIN joined j ON j.uid = u.USER_ID
+            LEFT JOIN joined j ON j.uid = u.ID
             WHERE {B2B_WHERE}
               AND {USER_FILTER}
             ORDER BY u.PRIMARY_AFFILIATION, u.SECONDARY_AFFILIATION, u.USER_NAME
         """).to_pandas()
         df.rename(columns={
-            "USER_ID":    "회원ID",
-            "USER_NAME":  "딜러성명",
+            "USER_PK":    "회원ID",
             "LOGIN_ID":   "로그인ID",
+            "USER_NAME":  "딜러성명",
             "BRAND":      "브랜드",
             "BRANCH_NAME":"지점명",
             "CREATED_DT": "회원가입일",
