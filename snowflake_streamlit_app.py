@@ -71,12 +71,22 @@ MANAGER_LIST = ['김경선','김미희','박순미','송민선','신영란','이
 # 탈퇴회원(IS_DELETED=TRUE) 및 테스트 계정 제외
 USER_FILTER = "IS_ASSOCIATE = 0 AND USER_NAME NOT LIKE '%테스트%' AND (IS_DELETED = FALSE OR IS_DELETED IS NULL)"
 
-# CH_EXPR: cv alias 필요 (counsel_vehicle join 필수)
+# CH_EXPR: cv alias 필요 (counsel_vehicle join 필수, 취소건 등 non-CTE 쿼리용)
 CH_EXPR = """
     CASE
         WHEN cv.REGISTRATION_TYPE = 'RENEWAL' THEN '갱신'
         WHEN ca.CHANNEL_PATH = 'INBOUND'      THEN 'CS'
         WHEN ca.CHANNEL_PATH = 'DEALER_APP'   THEN '딜러앱'
+        ELSE '기타'
+    END
+"""
+
+# CH_EXPR_CT: CONTRACT CTE 기반 쿼리용 (ct. alias)
+CH_EXPR_CT = """
+    CASE
+        WHEN ct.REGISTRATION_TYPE = 'RENEWAL' THEN '갱신'
+        WHEN ct.CHANNEL_PATH = 'INBOUND'      THEN 'CS'
+        WHEN ct.CHANNEL_PATH = 'DEALER_APP'   THEN '딜러앱'
         ELSE '기타'
     END
 """
@@ -93,6 +103,41 @@ G_ATTR_EXPR = """
         WHEN u.BUSINESS_TYPE = 'NEW_CAR_DEALER'                                      THEN 'G1/G2(신차)'
         ELSE '미분류'
     END
+"""
+
+# 실적 집계 표준 CTE (JOIN_COMPLETED + ACCUMULATE_PENDING, 차량 단위)
+_CONTRACT_CTE = """
+    WITH CONTRACT AS (
+        SELECT CA.COUNSEL_ID,
+               CA.USER_ID,
+               CA.COUNSEL_MANAGER_ID,
+               CA.SUBSCRIPTION_TYPE,
+               CA.CHANNEL_PATH,
+               CA.JOIN_INSURER_CODE,
+               CA.VEHICLE_USAGE_CODE,
+               CA.GIFT_ID,
+               CA.CUSTOMER_ID,
+               CV.COUNSEL_VEHICLE_ID,
+               CV.CONTRACT_AMOUNT,
+               CV.REGISTRATION_TYPE,
+               CASE WHEN CA.COUNSEL_STATUS = 'ACCUMULATE_PENDING'
+                    THEN LG.PENDING_AT
+                    ELSE CA.JOIN_COMPLETED_AT
+               END AS CONTRACT_AT
+        FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION CA
+        JOIN AJDCAR_PROD.PUBLIC.CUSTOMER C
+             ON C.CUSTOMER_ID = CA.CUSTOMER_ID AND C.IS_DELETED = FALSE
+        JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE CV
+             ON CV.COUNSEL_ID = CA.COUNSEL_ID AND CV.IS_DELETED = FALSE
+        LEFT JOIN (
+            SELECT COUNSEL_ID, MIN(CREATED_AT) AS PENDING_AT
+            FROM AJDCAR_PROD.PUBLIC.COUNSEL_STATUS_LOG
+            WHERE NEW_COUNSEL_STATUS = 'ACCUMULATE_PENDING'
+            GROUP BY COUNSEL_ID
+        ) LG ON LG.COUNSEL_ID = CA.COUNSEL_ID
+        WHERE CA.IS_DELETED = FALSE
+          AND CA.COUNSEL_STATUS IN ('JOIN_COMPLETED', 'ACCUMULATE_PENDING')
+    )
 """
 
 def apply_theme(chart):
@@ -207,18 +252,13 @@ with tab1:
     @st.cache_data(ttl=300)
     def get_kpi_premium(lms, spe):
         r = session.sql(f"""
+            {_CONTRACT_CTE}
             SELECT
-                SUM(CASE WHEN DATE_TRUNC('MONTH', ca.JOIN_COMPLETED_AT) = DATE_TRUNC('MONTH', CURRENT_DATE)
-                         THEN cv.CONTRACT_AMOUNT ELSE 0 END) AS cur_month,
-                SUM(CASE WHEN ca.JOIN_COMPLETED_AT::DATE BETWEEN '{lms}' AND '{spe}'
-                         THEN cv.CONTRACT_AMOUNT ELSE 0 END) AS last_same
-            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
-                ON ca.COUNSEL_ID = cv.COUNSEL_ID
-                AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
-            WHERE ca.COUNSEL_STATUS IN ('JOIN_COMPLETED', 'COMPARISON_COMPLETED')
-              AND ca.JOIN_COMPLETED_AT IS NOT NULL
-              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
+                SUM(CASE WHEN DATE_TRUNC('MONTH', ct.CONTRACT_AT) = DATE_TRUNC('MONTH', CURRENT_DATE)
+                         THEN ct.CONTRACT_AMOUNT ELSE 0 END) AS cur_month,
+                SUM(CASE WHEN ct.CONTRACT_AT::DATE BETWEEN '{lms}' AND '{spe}'
+                         THEN ct.CONTRACT_AMOUNT ELSE 0 END) AS last_same
+            FROM CONTRACT ct
         """).collect()
         return r[0]
 
@@ -236,12 +276,11 @@ with tab1:
 
     @st.cache_data(ttl=300)
     def get_kpi_active_dealer():
-        r = session.sql("""
-            SELECT COUNT(DISTINCT ca.USER_ID) AS active_60
-            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-            WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
-              AND ca.JOIN_COMPLETED_AT >= DATEADD('DAY', -60, CURRENT_DATE)
-              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
+        r = session.sql(f"""
+            {_CONTRACT_CTE}
+            SELECT COUNT(DISTINCT ct.USER_ID) AS active_60
+            FROM CONTRACT ct
+            WHERE ct.CONTRACT_AT::DATE >= DATEADD('DAY', -60, CURRENT_DATE)
         """).collect()
         t = session.sql("""
             SELECT COUNT(*) AS total_dealer
@@ -384,12 +423,11 @@ with tab1:
     @st.cache_data(ttl=300)
     def get_dealer_dist(days):
         df = session.sql(f"""
-            WITH dc AS (
-                SELECT USER_ID, COUNT(*) AS cnt
-                FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION
-                WHERE COUNSEL_STATUS = 'JOIN_COMPLETED'
-                  AND JOIN_COMPLETED_AT >= DATEADD('DAY', -{days}, CURRENT_DATE)
-                  AND (IS_DELETED = FALSE OR IS_DELETED IS NULL)
+            {_CONTRACT_CTE}
+            , dc AS (
+                SELECT ct.USER_ID, COUNT(*) AS cnt
+                FROM CONTRACT ct
+                WHERE ct.CONTRACT_AT::DATE >= DATEADD('DAY', -{days}, CURRENT_DATE)
                 GROUP BY 1
             )
             SELECT
@@ -439,18 +477,13 @@ with tab1:
 
     @st.cache_data(ttl=300)
     def get_daily50():
-        df = session.sql("""
+        df = session.sql(f"""
+            {_CONTRACT_CTE}
             SELECT
-                DATE_TRUNC('DAY', ca.JOIN_COMPLETED_AT)::DATE AS "일자",
-                SUM(cv.CONTRACT_AMOUNT) AS "원수보험료"
-            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
-                ON ca.COUNSEL_ID = cv.COUNSEL_ID
-                AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
-            WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
-              AND ca.JOIN_COMPLETED_AT IS NOT NULL
-              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
-              AND ca.JOIN_COMPLETED_AT::DATE >= DATEADD('DAY', -50, CURRENT_DATE)
+                ct.CONTRACT_AT::DATE AS "일자",
+                SUM(ct.CONTRACT_AMOUNT) AS "원수보험료"
+            FROM CONTRACT ct
+            WHERE ct.CONTRACT_AT::DATE >= DATEADD('DAY', -50, CURRENT_DATE)
             GROUP BY 1 ORDER BY 1 DESC
         """).to_pandas()
         df.columns = ["일자", "원수보험료"]
@@ -538,7 +571,7 @@ with tab1:
     with f4: sel_ch    = st.selectbox("영업채널", ["전체", "갱신", "CS", "딜러앱", "기타"])
 
     mgr_filter = "" if sel_mgr == "전체" else f"AND m.NAME = '{sel_mgr}'"
-    ch_filter  = "" if sel_ch  == "전체" else f"AND ({CH_EXPR}) = '{sel_ch}'"
+    ch_filter  = "" if sel_ch  == "전체" else f"AND ({CH_EXPR_CT}) = '{sel_ch}'"
 
     # ── 체결월별 영업채널 보험료 ───────────────────
     st.markdown('<div class="section-title">체결월별 영업채널 원수보험료</div>', unsafe_allow_html=True)
@@ -553,23 +586,18 @@ with tab1:
 
     @st.cache_data(ttl=300)
     def get_channel_premium(d_from, d_to, mgr_f, ch_f, unit):
-        grp = "TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM')" if unit == "월별" \
-              else "TO_CHAR(DATE_TRUNC('WEEK', ca.JOIN_COMPLETED_AT), 'YYYY-MM-DD')"
+        grp = "TO_CHAR(ct.CONTRACT_AT, 'YYYY-MM')" if unit == "월별" \
+              else "TO_CHAR(DATE_TRUNC('WEEK', ct.CONTRACT_AT), 'YYYY-MM-DD')"
         df = session.sql(f"""
+            {_CONTRACT_CTE}
             SELECT
                 {grp} AS "기간",
-                {CH_EXPR} AS "채널",
-                SUM(cv.CONTRACT_AMOUNT) AS "원수보험료"
-            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
-                ON ca.COUNSEL_ID = cv.COUNSEL_ID
-                AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
-            LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u ON ca.USER_ID = u.ID
-            LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON ca.COUNSEL_MANAGER_ID = m.ID
-            WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
-              AND ca.JOIN_COMPLETED_AT IS NOT NULL
-              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
-              AND ca.JOIN_COMPLETED_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
+                {CH_EXPR_CT} AS "채널",
+                SUM(ct.CONTRACT_AMOUNT) AS "원수보험료"
+            FROM CONTRACT ct
+            LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u ON u.ID = ct.USER_ID
+            LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON m.ID = ct.COUNSEL_MANAGER_ID
+            WHERE ct.CONTRACT_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
               AND (m.NAME IS NULL OR m.NAME NOT LIKE '%테스트%')
               {mgr_f} {ch_f}
             GROUP BY 1, 2 ORDER BY 1 DESC
@@ -611,15 +639,13 @@ with tab1:
         @st.cache_data(ttl=300)
         def get_active_dealer_monthly(d_from, d_to, mgr_f):
             df = session.sql(f"""
+                {_CONTRACT_CTE}
                 SELECT
-                    TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM') AS "월",
-                    COUNT(DISTINCT ca.USER_ID) AS "가동딜러수"
-                FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-                LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON ca.COUNSEL_MANAGER_ID = m.ID
-                WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
-                  AND ca.JOIN_COMPLETED_AT IS NOT NULL
-                  AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
-                  AND ca.JOIN_COMPLETED_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
+                    TO_CHAR(ct.CONTRACT_AT, 'YYYY-MM') AS "월",
+                    COUNT(DISTINCT ct.USER_ID) AS "가동딜러수"
+                FROM CONTRACT ct
+                LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON m.ID = ct.COUNSEL_MANAGER_ID
+                WHERE ct.CONTRACT_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
                   AND (m.NAME IS NULL OR m.NAME NOT LIKE '%테스트%')
                   {mgr_f}
                 GROUP BY 1 ORDER BY 1 DESC
@@ -647,18 +673,13 @@ with tab1:
         @st.cache_data(ttl=300)
         def get_per_dealer(d_from, d_to):
             df = session.sql(f"""
+                {_CONTRACT_CTE}
                 SELECT
                     COALESCE(u.BUSINESS_TYPE, '미분류') AS "딜러유형",
-                    SUM(cv.CONTRACT_AMOUNT) / NULLIF(COUNT(DISTINCT ca.USER_ID), 0) AS "인당원수보험료"
-                FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-                LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
-                    ON ca.COUNSEL_ID = cv.COUNSEL_ID
-                    AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
-                LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u ON ca.USER_ID = u.ID
-                WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
-                  AND ca.JOIN_COMPLETED_AT IS NOT NULL
-                  AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
-                  AND ca.JOIN_COMPLETED_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
+                    SUM(ct.CONTRACT_AMOUNT) / NULLIF(COUNT(DISTINCT ct.USER_ID), 0) AS "인당원수보험료"
+                FROM CONTRACT ct
+                LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u ON u.ID = ct.USER_ID
+                WHERE ct.CONTRACT_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
                   AND u.USER_NAME NOT LIKE '%테스트%'
                 GROUP BY 1 ORDER BY 2 DESC
             """).to_pandas()
@@ -685,19 +706,14 @@ with tab1:
 
     @st.cache_data(ttl=300)
     def get_insurer_monthly():
-        df = session.sql("""
+        df = session.sql(f"""
+            {_CONTRACT_CTE}
             SELECT
-                COALESCE(ca.JOIN_INSURER_CODE, '미분류') AS "보험사",
-                SUM(cv.CONTRACT_AMOUNT) AS "원수보험료",
+                COALESCE(ct.JOIN_INSURER_CODE, '미분류') AS "보험사",
+                SUM(ct.CONTRACT_AMOUNT) AS "원수보험료",
                 COUNT(*) AS "건수"
-            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
-                ON ca.COUNSEL_ID = cv.COUNSEL_ID
-                AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
-            WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
-              AND ca.JOIN_COMPLETED_AT IS NOT NULL
-              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
-              AND DATE_TRUNC('MONTH', ca.JOIN_COMPLETED_AT) = DATE_TRUNC('MONTH', CURRENT_DATE)
+            FROM CONTRACT ct
+            WHERE DATE_TRUNC('MONTH', ct.CONTRACT_AT) = DATE_TRUNC('MONTH', CURRENT_DATE)
             GROUP BY 1 ORDER BY 2 DESC
         """).to_pandas()
         df.columns = ["보험사", "원수보험료", "건수"]
@@ -740,19 +756,14 @@ with tab1:
     @st.cache_data(ttl=300)
     def get_pivot_3m():
         df = session.sql(f"""
+            {_CONTRACT_CTE}
             SELECT
-                TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM') AS "월",
-                COALESCE(ca.JOIN_INSURER_CODE, '미분류') AS "보험사",
-                {CH_EXPR} AS "채널",
-                SUM(cv.CONTRACT_AMOUNT) AS "원수보험료"
-            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
-                ON ca.COUNSEL_ID = cv.COUNSEL_ID
-                AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
-            WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
-              AND ca.JOIN_COMPLETED_AT IS NOT NULL
-              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
-              AND ca.JOIN_COMPLETED_AT >= DATEADD('MONTH', -3, DATE_TRUNC('MONTH', CURRENT_DATE))
+                TO_CHAR(ct.CONTRACT_AT, 'YYYY-MM') AS "월",
+                COALESCE(ct.JOIN_INSURER_CODE, '미분류') AS "보험사",
+                {CH_EXPR_CT} AS "채널",
+                SUM(ct.CONTRACT_AMOUNT) AS "원수보험료"
+            FROM CONTRACT ct
+            WHERE ct.CONTRACT_AT >= DATEADD('MONTH', -3, DATE_TRUNC('MONTH', CURRENT_DATE))
             GROUP BY 1, 2, 3 ORDER BY 1 DESC, 2, 3
         """).to_pandas()
         df.columns = ["월", "보험사", "채널", "원수보험료"]
@@ -940,7 +951,8 @@ with tab1:
     @st.cache_data(ttl=300)
     def get_cohort_kpi(cohort_ym, mgr_f, g_f):
         r = session.sql(f"""
-            WITH cohort AS (
+            {_CONTRACT_CTE}
+            , cohort AS (
                 SELECT
                     u.ID,
                     u.USER_NAME,
@@ -956,11 +968,9 @@ with tab1:
                   {mgr_f} {g_f}
             ),
             joined AS (
-                SELECT ca.USER_ID, COUNT(*) AS join_cnt
-                FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-                WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
-                  AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
-                  AND ca.USER_ID IN (SELECT ID FROM cohort)
+                SELECT ct.USER_ID, COUNT(*) AS join_cnt
+                FROM CONTRACT ct
+                WHERE ct.USER_ID IN (SELECT ID FROM cohort)
                 GROUP BY 1
             )
             SELECT
@@ -977,7 +987,8 @@ with tab1:
     @st.cache_data(ttl=300)
     def get_cohort_detail(cohort_ym, mgr_f, g_f):
         df = session.sql(f"""
-            WITH cohort AS (
+            {_CONTRACT_CTE}
+            , cohort AS (
                 SELECT
                     u.ID,
                     u.USER_ID          AS login_id,
@@ -996,18 +1007,13 @@ with tab1:
             ),
             joined AS (
                 SELECT
-                    ca.USER_ID,
-                    COUNT(*)                        AS join_cnt,
-                    MIN(ca.JOIN_COMPLETED_AT::DATE) AS first_join,
-                    MAX(ca.JOIN_COMPLETED_AT::DATE) AS last_join,
-                    SUM(cv.CONTRACT_AMOUNT)         AS total_premium
-                FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-                LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
-                    ON ca.COUNSEL_ID = cv.COUNSEL_ID
-                    AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
-                WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
-                  AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
-                  AND ca.USER_ID IN (SELECT ID FROM cohort)
+                    ct.USER_ID,
+                    COUNT(*)                      AS join_cnt,
+                    MIN(ct.CONTRACT_AT::DATE)     AS first_join,
+                    MAX(ct.CONTRACT_AT::DATE)     AS last_join,
+                    SUM(ct.CONTRACT_AMOUNT)       AS total_premium
+                FROM CONTRACT ct
+                WHERE ct.USER_ID IN (SELECT ID FROM cohort)
                 GROUP BY 1
             )
             SELECT
@@ -1034,7 +1040,8 @@ with tab1:
     @st.cache_data(ttl=300)
     def get_cohort_monthly_conv(cohort_ym, mgr_f, g_f):
         df = session.sql(f"""
-            WITH cohort AS (
+            {_CONTRACT_CTE}
+            , cohort AS (
                 SELECT u.ID
                 FROM AJDCAR_PROD.PUBLIC.USERS u
                 LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON u.MANAGER_ID = m.ID
@@ -1045,18 +1052,12 @@ with tab1:
                   {mgr_f} {g_f}
             )
             SELECT
-                TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM') AS "체결월",
-                COUNT(DISTINCT ca.USER_ID)                AS "체결딜러수",
-                COUNT(*)                                  AS "체결건수",
-                SUM(cv.CONTRACT_AMOUNT)                   AS "원수보험료"
-            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
-                ON ca.COUNSEL_ID = cv.COUNSEL_ID
-                AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
-            WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
-              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
-              AND ca.USER_ID IN (SELECT ID FROM cohort)
-              AND ca.JOIN_COMPLETED_AT IS NOT NULL
+                TO_CHAR(ct.CONTRACT_AT, 'YYYY-MM') AS "체결월",
+                COUNT(DISTINCT ct.USER_ID)          AS "체결딜러수",
+                COUNT(*)                            AS "체결건수",
+                SUM(ct.CONTRACT_AMOUNT)             AS "원수보험료"
+            FROM CONTRACT ct
+            WHERE ct.USER_ID IN (SELECT ID FROM cohort)
             GROUP BY 1 ORDER BY 1
         """).to_pandas()
         df.columns = ["체결월", "체결딜러수", "체결건수", "원수보험료"]
@@ -1317,26 +1318,21 @@ with tab2:
 
     ins_mgr_f = "" if ins_mgr == "전체" else f"AND m.NAME = '{ins_mgr}'"
     _sub_map  = {"CM": "CM", "TM": "TM", "오프라인": "OFFLINE"}
-    ins_sub_f = "" if ins_sub == "전체" else f"AND ca.SUBSCRIPTION_TYPE = '{_sub_map[ins_sub]}'"
+    ins_sub_f = "" if ins_sub == "전체" else f"AND ct.SUBSCRIPTION_TYPE = '{_sub_map[ins_sub]}'"
 
     # 당월 KPI
     st.markdown('<div class="section-title">당월 보험사별 현황</div>', unsafe_allow_html=True)
 
     @st.cache_data(ttl=300)
     def get_ins_cur_month():
-        df = session.sql("""
+        df = session.sql(f"""
+            {_CONTRACT_CTE}
             SELECT
-                COALESCE(ca.JOIN_INSURER_CODE, '미분류') AS "보험사",
-                SUM(cv.CONTRACT_AMOUNT) AS "원수보험료",
+                COALESCE(ct.JOIN_INSURER_CODE, '미분류') AS "보험사",
+                SUM(ct.CONTRACT_AMOUNT) AS "원수보험료",
                 COUNT(*) AS "건수"
-            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
-                ON ca.COUNSEL_ID = cv.COUNSEL_ID
-                AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
-            WHERE ca.COUNSEL_STATUS IN ('JOIN_COMPLETED', 'COMPARISON_COMPLETED')
-              AND ca.JOIN_COMPLETED_AT IS NOT NULL
-              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
-              AND DATE_TRUNC('MONTH', ca.JOIN_COMPLETED_AT) = DATE_TRUNC('MONTH', CURRENT_DATE)
+            FROM CONTRACT ct
+            WHERE DATE_TRUNC('MONTH', ct.CONTRACT_AT) = DATE_TRUNC('MONTH', CURRENT_DATE)
             GROUP BY 1 ORDER BY 2 DESC NULLS LAST
         """).to_pandas()
         df.columns = ["보험사", "원수보험료", "건수"]
@@ -1377,20 +1373,15 @@ with tab2:
     @st.cache_data(ttl=300)
     def get_ins_trend(d_from, d_to, mgr_f, sub_f):
         df = session.sql(f"""
+            {_CONTRACT_CTE}
             SELECT
-                TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM') AS "월",
-                COALESCE(ca.JOIN_INSURER_CODE, '미분류') AS "보험사",
-                SUM(cv.CONTRACT_AMOUNT) AS "원수보험료",
+                TO_CHAR(ct.CONTRACT_AT, 'YYYY-MM') AS "월",
+                COALESCE(ct.JOIN_INSURER_CODE, '미분류') AS "보험사",
+                SUM(ct.CONTRACT_AMOUNT) AS "원수보험료",
                 COUNT(*) AS "건수"
-            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
-                ON ca.COUNSEL_ID = cv.COUNSEL_ID
-                AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
-            LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON ca.COUNSEL_MANAGER_ID = m.ID
-            WHERE ca.COUNSEL_STATUS IN ('JOIN_COMPLETED', 'COMPARISON_COMPLETED')
-              AND ca.JOIN_COMPLETED_AT IS NOT NULL
-              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
-              AND ca.JOIN_COMPLETED_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
+            FROM CONTRACT ct
+            LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON m.ID = ct.COUNSEL_MANAGER_ID
+            WHERE ct.CONTRACT_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
               AND (m.NAME IS NULL OR m.NAME NOT LIKE '%테스트%')
               {mgr_f} {sub_f}
             GROUP BY 1, 2 ORDER BY 1 DESC, 3 DESC NULLS LAST
@@ -1422,20 +1413,15 @@ with tab2:
     @st.cache_data(ttl=300)
     def get_ins_pivot(sub_f):
         df = session.sql(f"""
+            {_CONTRACT_CTE}
             SELECT
-                TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM') AS "월",
-                COALESCE(ca.JOIN_INSURER_CODE, '미분류') AS "보험사",
-                {CH_EXPR} AS "채널",
-                SUM(cv.CONTRACT_AMOUNT) AS "원수보험료",
+                TO_CHAR(ct.CONTRACT_AT, 'YYYY-MM') AS "월",
+                COALESCE(ct.JOIN_INSURER_CODE, '미분류') AS "보험사",
+                {CH_EXPR_CT} AS "채널",
+                SUM(ct.CONTRACT_AMOUNT) AS "원수보험료",
                 COUNT(*) AS "건수"
-            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
-                ON ca.COUNSEL_ID = cv.COUNSEL_ID
-                AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
-            WHERE ca.COUNSEL_STATUS IN ('JOIN_COMPLETED', 'COMPARISON_COMPLETED')
-              AND ca.JOIN_COMPLETED_AT IS NOT NULL
-              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
-              AND ca.JOIN_COMPLETED_AT >= DATEADD('MONTH', -6, DATE_TRUNC('MONTH', CURRENT_DATE))
+            FROM CONTRACT ct
+            WHERE ct.CONTRACT_AT >= DATEADD('MONTH', -6, DATE_TRUNC('MONTH', CURRENT_DATE))
               {sub_f}
             GROUP BY 1, 2, 3 ORDER BY 1 DESC, 2, 3
         """).to_pandas()
@@ -1465,20 +1451,15 @@ with tab2:
     @st.cache_data(ttl=300)
     def get_g_ins(d_from, d_to):
         df = session.sql(f"""
+            {_CONTRACT_CTE}
             SELECT
                 {G_ATTR_EXPR} AS "G속성",
-                COALESCE(ca.JOIN_INSURER_CODE, '미분류') AS "보험사",
-                SUM(cv.CONTRACT_AMOUNT) AS "원수보험료",
+                COALESCE(ct.JOIN_INSURER_CODE, '미분류') AS "보험사",
+                SUM(ct.CONTRACT_AMOUNT) AS "원수보험료",
                 COUNT(*) AS "건수"
-            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
-                ON ca.COUNSEL_ID = cv.COUNSEL_ID
-                AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
-            LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u ON ca.USER_ID = u.ID
-            WHERE ca.COUNSEL_STATUS IN ('JOIN_COMPLETED', 'COMPARISON_COMPLETED')
-              AND ca.JOIN_COMPLETED_AT IS NOT NULL
-              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
-              AND ca.JOIN_COMPLETED_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
+            FROM CONTRACT ct
+            LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u ON u.ID = ct.USER_ID
+            WHERE ct.CONTRACT_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
               AND u.USER_NAME NOT LIKE '%테스트%'
             GROUP BY 1, 2 ORDER BY 1, 3 DESC NULLS LAST
         """).to_pandas()
@@ -1509,26 +1490,21 @@ with tab2:
     @st.cache_data(ttl=300)
     def get_sub_ins(d_from, d_to, mgr_f):
         df = session.sql(f"""
+            {_CONTRACT_CTE}
             SELECT
-                CASE ca.SUBSCRIPTION_TYPE
+                CASE ct.SUBSCRIPTION_TYPE
                     WHEN 'CM'      THEN 'CM'
                     WHEN 'TM'      THEN 'TM'
                     WHEN 'OFFLINE' THEN '오프라인'
-                    ELSE COALESCE(ca.SUBSCRIPTION_TYPE, '미분류')
+                    ELSE COALESCE(ct.SUBSCRIPTION_TYPE, '미분류')
                 END                                        AS "가입경로",
-                COALESCE(ca.JOIN_INSURER_CODE, '미분류')   AS "보험사",
-                TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM')  AS "월",
-                SUM(cv.CONTRACT_AMOUNT)                    AS "원수보험료",
+                COALESCE(ct.JOIN_INSURER_CODE, '미분류')   AS "보험사",
+                TO_CHAR(ct.CONTRACT_AT, 'YYYY-MM')         AS "월",
+                SUM(ct.CONTRACT_AMOUNT)                    AS "원수보험료",
                 COUNT(*)                                   AS "건수"
-            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
-                ON ca.COUNSEL_ID = cv.COUNSEL_ID
-                AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
-            LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON ca.COUNSEL_MANAGER_ID = m.ID
-            WHERE ca.COUNSEL_STATUS IN ('JOIN_COMPLETED', 'COMPARISON_COMPLETED')
-              AND ca.JOIN_COMPLETED_AT IS NOT NULL
-              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
-              AND ca.JOIN_COMPLETED_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
+            FROM CONTRACT ct
+            LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON m.ID = ct.COUNSEL_MANAGER_ID
+            WHERE ct.CONTRACT_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
               AND (m.NAME IS NULL OR m.NAME NOT LIKE '%테스트%')
               {mgr_f}
             GROUP BY 1, 2, 3
@@ -1841,26 +1817,24 @@ with tab4:
     @st.cache_data(ttl=600)
     def get_inactive_summary(base_str, ref_60, mgr_cond):
         r = session.sql(f"""
-            WITH cs AS (
+            {_CONTRACT_CTE}
+            , cs AS (
                 SELECT
                     u.ID               AS uid,
                     u.IS_ASSOCIATE,
                     u.CREATED_AT::DATE AS reg_date,
-                    COUNT(ca.COUNSEL_ID) AS total_cnt,
-                    MAX(CASE WHEN ca.COUNSEL_STATUS IN ('JOIN_COMPLETED','COMPARISON_COMPLETED')
-                                  AND ca.JOIN_COMPLETED_AT::DATE BETWEEN '{ref_60}' AND '{base_str}'
+                    COUNT(ct.COUNSEL_VEHICLE_ID) AS total_cnt,
+                    MAX(CASE WHEN ct.CONTRACT_AT::DATE BETWEEN '{ref_60}' AND '{base_str}'
                              THEN 1 ELSE 0 END) AS recent_act
                 FROM AJDCAR_PROD.PUBLIC.USERS u
                 LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON u.MANAGER_ID = m.ID
-                LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-                    ON u.ID = ca.USER_ID
-                    AND ca.COUNSEL_STATUS IN ('JOIN_COMPLETED','COMPARISON_COMPLETED')
-                    AND ca.JOIN_COMPLETED_AT::DATE <= '{base_str}'
-                    AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
+                LEFT JOIN CONTRACT ct
+                    ON ct.USER_ID = u.ID
+                    AND ct.CONTRACT_AT::DATE <= '{base_str}'
                 WHERE u.USER_NAME NOT LIKE '%테스트%'
                   AND (m.NAME IS NULL OR m.NAME NOT LIKE '%테스트%')
                   {mgr_cond}
-                GROUP BY 1,2,3
+                GROUP BY u.ID, u.IS_ASSOCIATE, u.CREATED_AT::DATE
             )
             SELECT
                 SUM(CASE WHEN IS_ASSOCIATE=0 AND total_cnt=0
@@ -1881,7 +1855,8 @@ with tab4:
             4: "IS_ASSOCIATE=1 AND total_cnt>=1 AND recent_act=0",
         }
         df = session.sql(f"""
-            WITH cs AS (
+            {_CONTRACT_CTE}
+            , cs AS (
                 SELECT
                     u.USER_ID           AS login_id,
                     u.USER_NAME         AS dealer_name,
@@ -1889,22 +1864,19 @@ with tab4:
                     u.CREATED_AT::DATE  AS reg_date,
                     m.NAME              AS manager_name,
                     {G_ATTR_EXPR}       AS g_attr,
-                    COUNT(ca.COUNSEL_ID)            AS total_cnt,
-                    MAX(ca.JOIN_COMPLETED_AT::DATE) AS last_contract_date,
-                    MAX(CASE WHEN ca.COUNSEL_STATUS IN ('JOIN_COMPLETED','COMPARISON_COMPLETED')
-                                  AND ca.JOIN_COMPLETED_AT::DATE BETWEEN '{ref_60}' AND '{base_str}'
+                    COUNT(ct.COUNSEL_VEHICLE_ID)   AS total_cnt,
+                    MAX(ct.CONTRACT_AT::DATE)       AS last_contract_date,
+                    MAX(CASE WHEN ct.CONTRACT_AT::DATE BETWEEN '{ref_60}' AND '{base_str}'
                              THEN 1 ELSE 0 END) AS recent_act
                 FROM AJDCAR_PROD.PUBLIC.USERS u
                 LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON u.MANAGER_ID = m.ID
-                LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-                    ON u.ID = ca.USER_ID
-                    AND ca.COUNSEL_STATUS IN ('JOIN_COMPLETED','COMPARISON_COMPLETED')
-                    AND ca.JOIN_COMPLETED_AT::DATE <= '{base_str}'
-                    AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
+                LEFT JOIN CONTRACT ct
+                    ON ct.USER_ID = u.ID
+                    AND ct.CONTRACT_AT::DATE <= '{base_str}'
                 WHERE u.USER_NAME NOT LIKE '%테스트%'
                   AND (m.NAME IS NULL OR m.NAME NOT LIKE '%테스트%')
                   {mgr_cond}
-                GROUP BY 1,2,3,4,5,6
+                GROUP BY u.USER_ID, u.USER_NAME, u.IS_ASSOCIATE, u.CREATED_AT::DATE, m.NAME, g_attr
             )
             SELECT
                 login_id           AS "로그인ID",
@@ -1924,26 +1896,24 @@ with tab4:
     @st.cache_data(ttl=600)
     def get_inactive_g_dist(base_str, ref_60, mgr_cond):
         df = session.sql(f"""
-            WITH cs AS (
+            {_CONTRACT_CTE}
+            , cs AS (
                 SELECT
                     u.IS_ASSOCIATE,
                     u.CREATED_AT::DATE AS reg_date,
                     {G_ATTR_EXPR}      AS g_attr,
-                    COUNT(ca.COUNSEL_ID) AS total_cnt,
-                    MAX(CASE WHEN ca.COUNSEL_STATUS IN ('JOIN_COMPLETED','COMPARISON_COMPLETED')
-                                  AND ca.JOIN_COMPLETED_AT::DATE BETWEEN '{ref_60}' AND '{base_str}'
+                    COUNT(ct.COUNSEL_VEHICLE_ID) AS total_cnt,
+                    MAX(CASE WHEN ct.CONTRACT_AT::DATE BETWEEN '{ref_60}' AND '{base_str}'
                              THEN 1 ELSE 0 END) AS recent_act
                 FROM AJDCAR_PROD.PUBLIC.USERS u
                 LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON u.MANAGER_ID = m.ID
-                LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-                    ON u.ID = ca.USER_ID
-                    AND ca.COUNSEL_STATUS IN ('JOIN_COMPLETED','COMPARISON_COMPLETED')
-                    AND ca.JOIN_COMPLETED_AT::DATE <= '{base_str}'
-                    AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
+                LEFT JOIN CONTRACT ct
+                    ON ct.USER_ID = u.ID
+                    AND ct.CONTRACT_AT::DATE <= '{base_str}'
                 WHERE u.USER_NAME NOT LIKE '%테스트%'
                   AND (m.NAME IS NULL OR m.NAME NOT LIKE '%테스트%')
                   {mgr_cond}
-                GROUP BY 1,2,3
+                GROUP BY u.IS_ASSOCIATE, u.CREATED_AT::DATE, g_attr
             )
             SELECT
                 g_attr AS "G속성",
@@ -2355,17 +2325,12 @@ with tab6:
 
     @st.cache_data(ttl=300)
     def get_t6_monthly_premium():
-        df = session.sql("""
+        df = session.sql(f"""
+            {_CONTRACT_CTE}
             SELECT
-                TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM') AS "체결월",
-                SUM(cv.CONTRACT_AMOUNT)                   AS "원수보험료(원)"
-            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
-                ON ca.COUNSEL_ID = cv.COUNSEL_ID
-                AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
-            WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
-              AND ca.JOIN_COMPLETED_AT IS NOT NULL
-              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
+                TO_CHAR(ct.CONTRACT_AT, 'YYYY-MM') AS "체결월",
+                SUM(ct.CONTRACT_AMOUNT)              AS "원수보험료(원)"
+            FROM CONTRACT ct
             GROUP BY 1 ORDER BY 1 DESC
             LIMIT 24
         """).to_pandas()
@@ -2414,20 +2379,17 @@ with tab6:
     @st.cache_data(ttl=300)
     def get_t6_brand_dist():
         df = session.sql(f"""
-            WITH deal90 AS (
-                SELECT USER_ID, COUNT(*) AS cnt90
-                FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION
-                WHERE COUNSEL_STATUS = 'JOIN_COMPLETED'
-                  AND JOIN_COMPLETED_AT >= DATEADD('DAY', -90, CURRENT_DATE)
-                  AND (IS_DELETED = FALSE OR IS_DELETED IS NULL)
+            {_CONTRACT_CTE}
+            , deal90 AS (
+                SELECT ct.USER_ID, COUNT(*) AS cnt90
+                FROM CONTRACT ct
+                WHERE ct.CONTRACT_AT::DATE >= DATEADD('DAY', -90, CURRENT_DATE)
                 GROUP BY 1
             ),
             deal60 AS (
-                SELECT USER_ID, COUNT(*) AS cnt60
-                FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION
-                WHERE COUNSEL_STATUS = 'JOIN_COMPLETED'
-                  AND JOIN_COMPLETED_AT >= DATEADD('DAY', -60, CURRENT_DATE)
-                  AND (IS_DELETED = FALSE OR IS_DELETED IS NULL)
+                SELECT ct.USER_ID, COUNT(*) AS cnt60
+                FROM CONTRACT ct
+                WHERE ct.CONTRACT_AT::DATE >= DATEADD('DAY', -60, CURRENT_DATE)
                 GROUP BY 1
             )
             SELECT
@@ -2480,16 +2442,14 @@ with tab6:
     @st.cache_data(ttl=300)
     def get_t6_active_dealer_g():
         df = session.sql(f"""
+            {_CONTRACT_CTE}
             SELECT
-                TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM') AS "체결월",
-                {G_ATTR_EXPR}                             AS "G속성",
-                COUNT(DISTINCT ca.USER_ID)                AS "가동딜러수"
-            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-            LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u ON ca.USER_ID = u.ID
-            WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
-              AND ca.JOIN_COMPLETED_AT IS NOT NULL
-              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
-              AND u.USER_NAME NOT LIKE '%테스트%'
+                TO_CHAR(ct.CONTRACT_AT, 'YYYY-MM') AS "체결월",
+                {G_ATTR_EXPR}                        AS "G속성",
+                COUNT(DISTINCT ct.USER_ID)           AS "가동딜러수"
+            FROM CONTRACT ct
+            LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u ON u.ID = ct.USER_ID
+            WHERE u.USER_NAME NOT LIKE '%테스트%'
             GROUP BY 1, 2
             ORDER BY 1 DESC
             LIMIT 300
@@ -2536,20 +2496,18 @@ with tab6:
 
     @st.cache_data(ttl=300)
     def get_t6_app_ratio():
-        df = session.sql("""
+        df = session.sql(f"""
+            {_CONTRACT_CTE}
             SELECT
-                TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM') AS "체결월",
-                SUM(CASE WHEN ca.CHANNEL_PATH = 'DEALER_APP' THEN 1 ELSE 0 END)     AS "딜러앱등록",
-                SUM(CASE WHEN COALESCE(ca.CHANNEL_PATH,'') != 'DEALER_APP' THEN 1 ELSE 0 END) AS "미등록",
+                TO_CHAR(ct.CONTRACT_AT, 'YYYY-MM') AS "체결월",
+                SUM(CASE WHEN ct.CHANNEL_PATH = 'DEALER_APP' THEN 1 ELSE 0 END)     AS "딜러앱등록",
+                SUM(CASE WHEN COALESCE(ct.CHANNEL_PATH,'') != 'DEALER_APP' THEN 1 ELSE 0 END) AS "미등록",
                 COUNT(*)                                                              AS "총체결건",
                 ROUND(
-                    SUM(CASE WHEN ca.CHANNEL_PATH = 'DEALER_APP' THEN 1 ELSE 0 END)
+                    SUM(CASE WHEN ct.CHANNEL_PATH = 'DEALER_APP' THEN 1 ELSE 0 END)
                     / NULLIF(COUNT(*), 0) * 100, 2
                 ) AS "앱등록비중(%)"
-            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-            WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
-              AND ca.JOIN_COMPLETED_AT IS NOT NULL
-              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
+            FROM CONTRACT ct
             GROUP BY 1 ORDER BY 1 DESC
             LIMIT 24
         """).to_pandas()
@@ -2662,26 +2620,21 @@ with tab7:
     @st.cache_data(ttl=300)
     def get_mgr_perf(d_from, d_to, unit):
         grp = (
-            "TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM')"
+            "TO_CHAR(ct.CONTRACT_AT, 'YYYY-MM')"
             if unit == "월별"
-            else "TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM-DD')"
+            else "TO_CHAR(ct.CONTRACT_AT, 'YYYY-MM-DD')"
         )
         df = session.sql(f"""
+            {_CONTRACT_CTE}
             SELECT
                 {grp}                          AS "기간",
                 COALESCE(m.NAME, '미배정')      AS "매니저",
-                {CH_EXPR}                       AS "채널",
-                SUM(cv.CONTRACT_AMOUNT)         AS "원수보험료",
+                {CH_EXPR_CT}                    AS "채널",
+                SUM(ct.CONTRACT_AMOUNT)         AS "원수보험료",
                 COUNT(*)                        AS "체결건수"
-            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
-                ON ca.COUNSEL_ID = cv.COUNSEL_ID
-                AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
-            LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON ca.COUNSEL_MANAGER_ID = m.ID
-            WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
-              AND ca.JOIN_COMPLETED_AT IS NOT NULL
-              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
-              AND ca.JOIN_COMPLETED_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
+            FROM CONTRACT ct
+            LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON m.ID = ct.COUNSEL_MANAGER_ID
+            WHERE ct.CONTRACT_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
               AND (m.NAME IS NULL OR m.NAME NOT LIKE '%테스트%')
             GROUP BY 1, 2, 3
             ORDER BY 1 DESC, 2, 3
@@ -2868,48 +2821,49 @@ with tab7:
     @st.cache_data(ttl=300)
     def get_raw_joined(d_from, d_to):
         df = session.sql(f"""
+            {_CONTRACT_CTE}
             SELECT
                 /* 영업채널 */
-                {CH_EXPR}                                                          AS "영업채널",
+                {CH_EXPR_CT}                                                       AS "영업채널",
 
-                /* 고객 정보 — CUSTOMER 테이블 JOIN */
+                /* 고객 정보 — CUSTOMER 테이블 (CTE에 CUSTOMER_ID 포함) */
                 COALESCE(cust.CUSTOMER_NAME, '-')                                  AS "고객명",
 
                 /* 차량번호 — counsel_vehicle.LICENSE_PLATE_NUMBER */
                 COALESCE(cv.LICENSE_PLATE_NUMBER, '-')                             AS "차량번호",
 
                 /* 보험료 */
-                cv.CONTRACT_AMOUNT                                                 AS "보험료",
+                ct.CONTRACT_AMOUNT                                                 AS "보험료",
 
                 /* 가입보험사 */
-                COALESCE(ca.JOIN_INSURER_CODE, '-')                                AS "가입보험사",
+                COALESCE(ct.JOIN_INSURER_CODE, '-')                                AS "가입보험사",
 
                 /* 가입경로: SUBSCRIPTION_TYPE → CM/TM/OFFLINE */
-                CASE ca.SUBSCRIPTION_TYPE
+                CASE ct.SUBSCRIPTION_TYPE
                     WHEN 'CM'      THEN 'CM'
                     WHEN 'TM'      THEN 'TM'
                     WHEN 'OFFLINE' THEN '오프라인'
-                    ELSE COALESCE(ca.SUBSCRIPTION_TYPE, '-')
+                    ELSE COALESCE(ct.SUBSCRIPTION_TYPE, '-')
                 END                                                                AS "가입경로",
 
-                /* 만기월 — counsel_application.INSURANCE_END_DT (새 보험 만기일) */
-                COALESCE(TO_CHAR(ca.INSURANCE_END_DT, 'YYYY-MM'), '-')            AS "만기월",
+                /* 만기월 — counsel_application.INSURANCE_END_DT */
+                COALESCE(TO_CHAR(ca2.INSURANCE_END_DT, 'YYYY-MM'), '-')           AS "만기월",
 
                 /* 영업용 여부 — counsel_application.VEHICLE_USAGE_CODE */
                 CASE
-                    WHEN ca.VEHICLE_USAGE_CODE IS NULL THEN '-'
-                    WHEN ca.VEHICLE_USAGE_CODE IN ('COMMERCIAL','BUSINESS') THEN '영업용'
+                    WHEN ct.VEHICLE_USAGE_CODE IS NULL THEN '-'
+                    WHEN ct.VEHICLE_USAGE_CODE IN ('COMMERCIAL','BUSINESS') THEN '영업용'
                     ELSE '비영업용'
                 END                                                                AS "영업용여부",
 
                 /* 체결 일자 / 월 */
-                ca.JOIN_COMPLETED_AT::DATE                                         AS "체결일자",
-                TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM')                          AS "체결월",
+                ct.CONTRACT_AT::DATE                                               AS "체결일자",
+                TO_CHAR(ct.CONTRACT_AT, 'YYYY-MM')                                AS "체결월",
 
                 /* 매니저 */
                 COALESCE(m.NAME, '미배정')                                         AS "매니저",
 
-                /* 주유권 — GIFT 테이블 JOIN (ca.GIFT_ID → gift.GIFT_NAME) */
+                /* 주유권 — GIFT 테이블 JOIN */
                 COALESCE(g.GIFT_NAME, '-')                                         AS "주유권",
 
                 /* 회원 정보 */
@@ -2921,25 +2875,23 @@ with tab7:
                 NULL                                                               AS "직전1년본인혜택건수",
                 NULL                                                               AS "갱신_직전60일딜러계약건수"
 
-            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
+            FROM CONTRACT ct
+            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca2
+                ON ca2.COUNSEL_ID = ct.COUNSEL_ID
             LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv
-                ON ca.COUNSEL_ID = cv.COUNSEL_ID
-                AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
+                ON cv.COUNSEL_VEHICLE_ID = ct.COUNSEL_VEHICLE_ID
             LEFT JOIN AJDCAR_PROD.PUBLIC.CUSTOMER cust
-                ON ca.CUSTOMER_ID = cust.CUSTOMER_ID
+                ON cust.CUSTOMER_ID = ct.CUSTOMER_ID
                 AND (cust.IS_DELETED = FALSE OR cust.IS_DELETED IS NULL)
             LEFT JOIN AJDCAR_PROD.PUBLIC.GIFT g
-                ON ca.GIFT_ID = g.GIFT_ID
+                ON g.GIFT_ID = ct.GIFT_ID
             LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u
-                ON ca.USER_ID = u.ID
+                ON u.ID = ct.USER_ID
             LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m
-                ON ca.COUNSEL_MANAGER_ID = m.ID
-            WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
-              AND ca.JOIN_COMPLETED_AT IS NOT NULL
-              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
-              AND ca.JOIN_COMPLETED_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
+                ON m.ID = ct.COUNSEL_MANAGER_ID
+            WHERE ct.CONTRACT_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
               AND (m.NAME IS NULL OR m.NAME NOT LIKE '%테스트%')
-            ORDER BY ca.JOIN_COMPLETED_AT DESC
+            ORDER BY ct.CONTRACT_AT DESC
         """).to_pandas()
         return df
 
@@ -3014,20 +2966,16 @@ with tab8:
     def get_b2b_trend():
         """소속별 월별 체결건수 + 원수보험료 추이"""
         df = session.sql(f"""
+            {_CONTRACT_CTE}
             SELECT
-                TO_CHAR(ca.JOIN_COMPLETED_AT, 'YYYY-MM')  AS YM,
-                u.PRIMARY_AFFILIATION                      AS BRAND,
-                u.SECONDARY_AFFILIATION                    AS BRANCH_NAME,
-                COUNT(*)                                   AS CNT,
-                SUM(cv.CONTRACT_AMOUNT)                    AS FEE
-            FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-            LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv ON cv.COUNSEL_ID = ca.COUNSEL_ID
-            LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u ON u.ID = ca.USER_ID
-            WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
-              AND ca.JOIN_COMPLETED_AT IS NOT NULL
-              AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
-              AND (cv.IS_DELETED = FALSE OR cv.IS_DELETED IS NULL)
-              AND ({b2b_where_parts})
+                TO_CHAR(ct.CONTRACT_AT, 'YYYY-MM')   AS YM,
+                u.PRIMARY_AFFILIATION                  AS BRAND,
+                u.SECONDARY_AFFILIATION                AS BRANCH_NAME,
+                COUNT(*)                               AS CNT,
+                SUM(ct.CONTRACT_AMOUNT)                AS FEE
+            FROM CONTRACT ct
+            LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u ON u.ID = ct.USER_ID
+            WHERE ({b2b_where_parts})
               AND u.IS_ASSOCIATE = 0
               AND u.USER_NAME NOT LIKE '%테스트%'
               AND (u.IS_DELETED = FALSE OR u.IS_DELETED IS NULL)
@@ -3044,21 +2992,18 @@ with tab8:
     @st.cache_data(ttl=300)
     def get_b2b_list():
         df = session.sql(f"""
-            WITH joined AS (
+            {_CONTRACT_CTE}
+            , joined AS (
                 SELECT
-                    ca.USER_ID                                                         AS uid,
+                    ct.USER_ID                                                         AS uid,
                     COUNT(*)                                                           AS cnt_total,
-                    SUM(cv.CONTRACT_AMOUNT)                                            AS fee_total,
-                    MIN(ca.JOIN_COMPLETED_AT::DATE)                                   AS dt_first,
-                    MAX(ca.JOIN_COMPLETED_AT::DATE)                                   AS dt_last,
-                    COUNT(CASE WHEN ca.JOIN_COMPLETED_AT::DATE
+                    SUM(ct.CONTRACT_AMOUNT)                                            AS fee_total,
+                    MIN(ct.CONTRACT_AT::DATE)                                          AS dt_first,
+                    MAX(ct.CONTRACT_AT::DATE)                                          AS dt_last,
+                    COUNT(CASE WHEN ct.CONTRACT_AT::DATE
                                >= DATEADD('day', -60, CURRENT_DATE()) THEN 1 END)    AS cnt_60d
-                FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
-                LEFT JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv ON cv.COUNSEL_ID = ca.COUNSEL_ID
-                WHERE ca.COUNSEL_STATUS = 'JOIN_COMPLETED'
-                  AND ca.JOIN_COMPLETED_AT IS NOT NULL
-                  AND (ca.IS_DELETED = FALSE OR ca.IS_DELETED IS NULL)
-                GROUP BY ca.USER_ID
+                FROM CONTRACT ct
+                GROUP BY ct.USER_ID
             )
             SELECT
                 u.ID                           AS USER_PK,
