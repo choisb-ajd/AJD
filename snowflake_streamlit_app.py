@@ -68,6 +68,13 @@ BAR_MAIN = "#4c78a8"
 
 MANAGER_LIST = ['김경선','김미희','박순미','송민선','신영란','이선','이선이','정혜령','최현정']
 
+# 매니저 소속 (MANAGER.MANAGER_AFFILIATION)
+AFFILIATION_MAP = {
+    "파이낸셜":   "FINANCIAL",
+    "인슈어런스": "INSURANCE",
+    "파트너스":   "PARTNERS",
+}
+
 # 탈퇴회원(IS_DELETED=TRUE) 및 테스트 계정 제외
 USER_FILTER = "IS_ASSOCIATE = 0 AND USER_NAME NOT LIKE '%테스트%' AND (IS_DELETED = FALSE OR IS_DELETED IS NULL)"
 
@@ -2604,7 +2611,7 @@ with tab7:
     """, unsafe_allow_html=True)
 
     # ── 필터 ──────────────────────────────────────
-    mf1, mf2, mf3, mf4 = st.columns(4)
+    mf1, mf2, mf3, mf4, mf5 = st.columns(5)
     with mf1:
         mgr7_from = st.date_input("시작일", value=today.replace(day=1), key="mgr7_from")
     with mf2:
@@ -2613,12 +2620,19 @@ with tab7:
         mgr7_metric = st.radio("지표", ["원수보험료", "체결건수"], horizontal=True, key="mgr7_metric")
     with mf4:
         mgr7_unit = st.radio("단위", ["월별", "일별"], horizontal=True, key="mgr7_unit")
+    with mf5:
+        mgr7_aff = st.selectbox("소속", ["전체", "파이낸셜", "인슈어런스", "파트너스"], key="mgr7_aff")
+
+    mgr7_aff_f = (
+        "" if mgr7_aff == "전체"
+        else f"AND m.MANAGER_AFFILIATION = '{AFFILIATION_MAP[mgr7_aff]}'"
+    )
 
     CH_LIST = ["갱신", "딜러앱", "CS", "기타"]
 
     # ── 데이터 로드 ───────────────────────────────
     @st.cache_data(ttl=300)
-    def get_mgr_perf(d_from, d_to, unit):
+    def get_mgr_perf(d_from, d_to, unit, aff_f):
         grp = (
             "TO_CHAR(ct.CONTRACT_AT, 'YYYY-MM')"
             if unit == "월별"
@@ -2627,23 +2641,25 @@ with tab7:
         df = session.sql(f"""
             {_CONTRACT_CTE}
             SELECT
-                {grp}                          AS "기간",
-                COALESCE(m.NAME, '미배정')      AS "매니저",
-                {CH_EXPR_CT}                    AS "채널",
-                SUM(ct.CONTRACT_AMOUNT)         AS "원수보험료",
-                COUNT(*)                        AS "체결건수"
+                {grp}                                    AS GRP,
+                COALESCE(m.NAME, '미배정')               AS MGR,
+                COALESCE(m.MANAGER_AFFILIATION, '-')     AS AFF,
+                {CH_EXPR_CT}                             AS CH,
+                SUM(ct.CONTRACT_AMOUNT)                  AS FEE,
+                COUNT(*)                                 AS CNT
             FROM CONTRACT ct
             LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON m.ID = ct.COUNSEL_MANAGER_ID
             WHERE ct.CONTRACT_AT::DATE BETWEEN '{d_from}' AND '{d_to}'
               AND (m.NAME IS NULL OR m.NAME NOT LIKE '%테스트%')
-            GROUP BY 1, 2, 3
-            ORDER BY 1 DESC, 2, 3
+              {aff_f}
+            GROUP BY 1, 2, 3, 4
+            ORDER BY 1 DESC, 2, 4
         """).to_pandas()
-        df.columns = ["기간", "매니저", "채널", "원수보험료", "체결건수"]
+        df.columns = ["기간", "매니저", "소속", "채널", "원수보험료", "체결건수"]
         return df
 
     try:
-        df_mgr = get_mgr_perf(mgr7_from, mgr7_to, mgr7_unit)
+        df_mgr = get_mgr_perf(mgr7_from, mgr7_to, mgr7_unit, mgr7_aff_f)
     except Exception as e:
         st.error(f"데이터 조회 오류: {e}")
         df_mgr = pd.DataFrame()
@@ -2657,13 +2673,13 @@ with tab7:
         st.markdown('<div class="section-title">매니저별 합계</div>', unsafe_allow_html=True)
 
         df_kpi = (
-            df_mgr.groupby("매니저")[["원수보험료", "체결건수"]]
+            df_mgr.groupby(["매니저", "소속"])[["원수보험료", "체결건수"]]
             .sum()
             .reset_index()
             .sort_values("원수보험료", ascending=False)
         )
         total_row = pd.DataFrame({
-            "매니저": ["합계"],
+            "매니저": ["합계"], "소속": ["-"],
             "원수보험료": [df_kpi["원수보험료"].sum()],
             "체결건수": [df_kpi["체결건수"].sum()],
         })
@@ -3006,19 +3022,22 @@ with tab8:
                 GROUP BY ct.USER_ID
             )
             SELECT
-                u.ID                           AS USER_PK,
-                u.USER_ID                      AS LOGIN_ID,
-                u.USER_NAME                    AS USER_NAME,
-                u.PRIMARY_AFFILIATION          AS BRAND,
-                u.SECONDARY_AFFILIATION        AS BRANCH_NAME,
-                u.CREATED_AT::DATE             AS CREATED_DT,
-                j.dt_first                     AS DT_FIRST,
-                j.dt_last                      AS DT_LAST,
-                COALESCE(j.cnt_total,  0)      AS CNT_TOTAL,
-                COALESCE(j.fee_total,  0)      AS FEE_TOTAL,
-                COALESCE(j.cnt_60d,    0)      AS CNT_60D
+                u.ID                                        AS USER_PK,
+                u.USER_ID                                   AS LOGIN_ID,
+                u.USER_NAME                                 AS USER_NAME,
+                u.PRIMARY_AFFILIATION                       AS BRAND,
+                u.SECONDARY_AFFILIATION                     AS BRANCH_NAME,
+                u.CREATED_AT::DATE                          AS CREATED_DT,
+                COALESCE(m.NAME, '-')                       AS MGR_NAME,
+                COALESCE(m.MANAGER_AFFILIATION, '-')        AS MGR_AFF,
+                j.dt_first                                  AS DT_FIRST,
+                j.dt_last                                   AS DT_LAST,
+                COALESCE(j.cnt_total,  0)                   AS CNT_TOTAL,
+                COALESCE(j.fee_total,  0)                   AS FEE_TOTAL,
+                COALESCE(j.cnt_60d,    0)                   AS CNT_60D
             FROM AJDCAR_PROD.PUBLIC.USERS u
             LEFT JOIN joined j ON j.uid = u.ID
+            LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m ON m.ID = u.MANAGER_ID
             WHERE {B2B_WHERE}
               AND {USER_FILTER}
             ORDER BY u.PRIMARY_AFFILIATION, u.SECONDARY_AFFILIATION, u.USER_NAME
@@ -3030,6 +3049,8 @@ with tab8:
             "BRAND":      "브랜드",
             "BRANCH_NAME":"지점명",
             "CREATED_DT": "회원가입일",
+            "MGR_NAME":   "담당매니저",
+            "MGR_AFF":    "매니저소속",
             "DT_FIRST":   "최초계약완료일",
             "DT_LAST":    "최근계약완료일",
             "CNT_TOTAL":  "누적계약체결수",
@@ -3201,6 +3222,7 @@ with tab8:
 
         col_order = [
             "브랜드", "지점명", "딜러성명", "로그인ID", "회원ID",
+            "담당매니저", "매니저소속",
             "회원가입일", "최초계약완료일", "최근계약완료일",
             "누적계약체결수", "누적총원수보험료", "직전60일계약건수",
         ]
