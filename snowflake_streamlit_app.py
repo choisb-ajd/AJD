@@ -2621,7 +2621,7 @@ with tab7:
     with mf4:
         mgr7_unit = st.radio("단위", ["월별", "일별"], horizontal=True, key="mgr7_unit")
     with mf5:
-        mgr7_aff = st.selectbox("소속", ["전체", "파이낸셜", "인슈어런스", "파트너스"], key="mgr7_aff")
+        mgr7_aff = st.selectbox("소속", ["파이낸셜", "인슈어런스", "파트너스", "전체"], key="mgr7_aff")
 
     mgr7_aff_f = (
         "" if mgr7_aff == "전체"
