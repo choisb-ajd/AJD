@@ -68,7 +68,7 @@ BAR_MAIN = "#4c78a8"
 
 MANAGER_LIST = ['김경선','김미희','박순미','송민선','신영란','이선','이선이','정혜령','최현정']
 
-# 매니저 소속 (MANAGER.MANAGER_AFFILIATION — Snowflake rename 완료)
+# 매니저 소속 (MANAGER.MANAGER_ROLE — rename 후 MANAGER_AFFILIATION으로 전환 예정)
 AFFILIATION_MAP = {
     "파이낸셜":   "FINANCIAL",
     "인슈어런스": "INSURANCE",
@@ -2630,7 +2630,7 @@ with tab7:
 
     mgr7_aff_f = (
         "" if mgr7_aff == "전체"
-        else f"AND m.MANAGER_AFFILIATION = '{AFFILIATION_MAP[mgr7_aff]}'"
+        else f"AND m.MANAGER_ROLE = '{AFFILIATION_MAP[mgr7_aff]}'"
     )
 
     CH_LIST = ["갱신", "딜러앱", "CS", "기타"]
@@ -2648,7 +2648,7 @@ with tab7:
             SELECT
                 {grp}                                    AS GRP,
                 COALESCE(m.NAME, '미배정')               AS MGR,
-                COALESCE(m.MANAGER_AFFILIATION, '-')     AS AFF,
+                COALESCE(m.MANAGER_ROLE, '-')     AS AFF,
                 {CH_EXPR_CT}                             AS CH,
                 SUM(ct.CONTRACT_AMOUNT)                  AS FEE,
                 COUNT(*)                                 AS CNT
@@ -3034,7 +3034,7 @@ with tab8:
                 u.SECONDARY_AFFILIATION                     AS BRANCH_NAME,
                 u.CREATED_AT::DATE                          AS CREATED_DT,
                 COALESCE(m.NAME, '-')                       AS MGR_NAME,
-                COALESCE(m.MANAGER_AFFILIATION, '-')        AS MGR_AFF,
+                COALESCE(m.MANAGER_ROLE, '-')        AS MGR_AFF,
                 j.dt_first                                  AS DT_FIRST,
                 j.dt_last                                   AS DT_LAST,
                 COALESCE(j.cnt_total,  0)                   AS CNT_TOTAL,
