@@ -941,7 +941,7 @@ with tab1:
     </div>
     """, unsafe_allow_html=True)
 
-    coh1, coh2, coh3 = st.columns(3)
+    coh1, coh2 = st.columns(2)
     with coh1:
         cohort_months = []
         _cd = today.replace(day=1)
@@ -950,11 +950,9 @@ with tab1:
             _cd = (_cd - timedelta(days=1)).replace(day=1)
         sel_cohort = st.selectbox("앱 가입월 선택", cohort_months, key="sel_cohort")
     with coh2:
-        coh_mgr = st.selectbox("담당매니저", ["전체"] + MANAGER_LIST, key="coh_mgr")
-    with coh3:
         coh_g = st.selectbox("G속성", ["전체","G1(수입)","G2(국산)","G3(중고차)","G4(보험설계)","G5(에이전시)"], key="coh_g")
 
-    coh_mgr_f = "" if coh_mgr == "전체" else f"AND m.NAME = '{coh_mgr}'"
+    coh_mgr_f = ""
     coh_g_f   = "" if coh_g  == "전체" else f"AND ({G_ATTR_EXPR}) = '{coh_g}'"
 
     @st.cache_data(ttl=300)
