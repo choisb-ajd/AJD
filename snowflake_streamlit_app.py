@@ -76,6 +76,20 @@ AFFILIATION_MAP = {
 # Tab7: 파이낸셜 소속 매니저만 실적 집계 (고정)
 MGR7_AFF_FILTER = "AND m.MANAGER_ROLE = 'FINANCIAL'"
 
+# 상조회(B2B) 대상 그룹 (Tab 1 인입채널 + Tab 8 공용)
+B2B_GROUPS = [
+    ("현대", "하계"),
+    ("현대", "우이"),
+    ("BMW", "방배"),
+    ("BMW", "자유로"),
+    ("BMW", "남양주"),
+]
+_b2b_parts = " OR ".join(
+    f"(u.PRIMARY_AFFILIATION = '{b1}' AND u.SECONDARY_AFFILIATION = '{b2}')"
+    for b1, b2 in B2B_GROUPS
+)
+B2B_WHERE = f"({_b2b_parts})"
+
 # 탈퇴회원(IS_DELETED=TRUE) 및 테스트 계정 제외
 USER_FILTER = "IS_ASSOCIATE = 0 AND USER_NAME NOT LIKE '%테스트%' AND (IS_DELETED = FALSE OR IS_DELETED IS NULL)"
 
@@ -795,9 +809,77 @@ with tab1:
         st.info("데이터 없음")
 
     # ── 인입채널 빈 표 ────────────────────────────
-    st.markdown('<div class="section-title">인입채널별 현황 (오프팀/상조회/B2B)</div>',
+    st.markdown('<div class="section-title">인입채널별 현황 (상조회/B2B)</div>',
                 unsafe_allow_html=True)
-    st.markdown('<div class="empty-box">데이터 준비중입니다</div>', unsafe_allow_html=True)
+
+    @st.cache_data(ttl=300)
+    def get_b2b_kpi_tab1():
+        r = session.sql(f"""
+            {_CONTRACT_CTE}
+            SELECT
+                SUM(CASE WHEN DATE_TRUNC('MONTH', ct.CONTRACT_AT) = DATE_TRUNC('MONTH', CURRENT_DATE)
+                         THEN ct.CONTRACT_AMOUNT ELSE 0 END)  AS cur_fee,
+                COUNT(CASE WHEN DATE_TRUNC('MONTH', ct.CONTRACT_AT) = DATE_TRUNC('MONTH', CURRENT_DATE)
+                           THEN 1 END)                         AS cur_cnt,
+                SUM(ct.CONTRACT_AMOUNT)                        AS total_fee,
+                COUNT(*)                                       AS total_cnt,
+                COUNT(DISTINCT ct.USER_ID)                     AS dealer_cnt
+            FROM CONTRACT ct
+            LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u ON u.ID = ct.USER_ID
+            WHERE {B2B_WHERE}
+              AND u.IS_ASSOCIATE = 0
+              AND u.USER_NAME NOT LIKE '%테스트%'
+              AND (u.IS_DELETED = FALSE OR u.IS_DELETED IS NULL)
+        """).collect()
+        return r[0]
+
+    @st.cache_data(ttl=300)
+    def get_b2b_group_tab1():
+        df = session.sql(f"""
+            {_CONTRACT_CTE}
+            SELECT
+                u.PRIMARY_AFFILIATION                          AS BRAND,
+                u.SECONDARY_AFFILIATION                        AS BRANCH,
+                COUNT(DISTINCT ct.USER_ID)                     AS DEALER_CNT,
+                COUNT(CASE WHEN DATE_TRUNC('MONTH', ct.CONTRACT_AT) = DATE_TRUNC('MONTH', CURRENT_DATE)
+                           THEN 1 END)                         AS CUR_CNT,
+                SUM(CASE WHEN DATE_TRUNC('MONTH', ct.CONTRACT_AT) = DATE_TRUNC('MONTH', CURRENT_DATE)
+                         THEN ct.CONTRACT_AMOUNT ELSE 0 END)   AS CUR_FEE,
+                COUNT(*)                                       AS TOTAL_CNT,
+                SUM(ct.CONTRACT_AMOUNT)                        AS TOTAL_FEE
+            FROM CONTRACT ct
+            LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u ON u.ID = ct.USER_ID
+            WHERE {B2B_WHERE}
+              AND u.IS_ASSOCIATE = 0
+              AND u.USER_NAME NOT LIKE '%테스트%'
+              AND (u.IS_DELETED = FALSE OR u.IS_DELETED IS NULL)
+            GROUP BY 1, 2
+            ORDER BY 1, 2
+        """).to_pandas()
+        df.rename(columns={
+            "BRAND": "브랜드", "BRANCH": "지점명",
+            "DEALER_CNT": "딜러수", "CUR_CNT": "당월건수",
+            "CUR_FEE": "당월원수보험료", "TOTAL_CNT": "누적건수", "TOTAL_FEE": "누적원수보험료",
+        }, inplace=True)
+        return df
+
+    try:
+        b2b_k = get_b2b_kpi_tab1()
+        bk1, bk2, bk3, bk4, bk5 = st.columns(5)
+        with bk1: st.markdown(kpi_card("상조회 딜러수",      f"{b2b_k['DEALER_CNT'] or 0:,}명"), unsafe_allow_html=True)
+        with bk2: st.markdown(kpi_card("당월 체결건수",      f"{b2b_k['CUR_CNT'] or 0:,}건"),   unsafe_allow_html=True)
+        with bk3: st.markdown(kpi_card("당월 원수보험료",    fmt_won(b2b_k["CUR_FEE"] or 0)),    unsafe_allow_html=True)
+        with bk4: st.markdown(kpi_card("누적 체결건수",      f"{b2b_k['TOTAL_CNT'] or 0:,}건"),  unsafe_allow_html=True)
+        with bk5: st.markdown(kpi_card("누적 원수보험료",    fmt_won(b2b_k["TOTAL_FEE"] or 0)),  unsafe_allow_html=True)
+
+        df_b2b_g = get_b2b_group_tab1()
+        if not df_b2b_g.empty:
+            df_b2b_g["당월원수보험료"] = df_b2b_g["당월원수보험료"].apply(lambda x: f"{int(x):,}")
+            df_b2b_g["누적원수보험료"] = df_b2b_g["누적원수보험료"].apply(lambda x: f"{int(x):,}")
+            st.caption("그룹별 현황")
+            st.dataframe(df_b2b_g, use_container_width=True, hide_index=True)
+    except Exception as e:
+        st.warning(f"상조회(B2B) 조회 오류: {e}")
 
     # ── 리텐션 딜러 현황 ──────────────────────────
     st.markdown('<div class="section-title">리텐션 딜러 현황</div>', unsafe_allow_html=True)
@@ -2952,23 +3034,7 @@ with tab8:
     </div>
     """, unsafe_allow_html=True)
 
-    # ── B2B 대상 필터 ──────────────────────────────────────────
-    B2B_GROUPS = [
-        ("현대", "하계"),
-        ("현대", "우이"),
-        ("BMW", "방배"),
-        ("BMW", "자유로"),
-        ("BMW", "남양주"),
-    ]
-
-    # BRAND_1(1차 소속) / BRANCH_NAME(2차 소속) 컬럼명은
-    # 실제 Snowflake 스키마에 맞게 조정 필요
-    # 현재 USERS 테이블 기준: BRAND (브랜드), BRANCH_NAME (지점명)
-    b2b_where_parts = " OR ".join(
-        f"(u.PRIMARY_AFFILIATION = '{b1}' AND u.SECONDARY_AFFILIATION = '{b2}')"
-        for b1, b2 in B2B_GROUPS
-    )
-    B2B_WHERE = f"({b2b_where_parts})"
+    # B2B_GROUPS / B2B_WHERE 는 전역 상수 사용 (파일 상단 정의)
 
     @st.cache_data(ttl=300)
     def get_b2b_trend():
@@ -2983,7 +3049,7 @@ with tab8:
                 SUM(ct.CONTRACT_AMOUNT)                AS FEE
             FROM CONTRACT ct
             LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u ON u.ID = ct.USER_ID
-            WHERE ({b2b_where_parts})
+            WHERE {B2B_WHERE}
               AND u.IS_ASSOCIATE = 0
               AND u.USER_NAME NOT LIKE '%테스트%'
               AND (u.IS_DELETED = FALSE OR u.IS_DELETED IS NULL)
