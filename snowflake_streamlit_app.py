@@ -68,7 +68,7 @@ BAR_MAIN = "#4c78a8"
 
 MANAGER_LIST = ['김경선','김미희','박순미','송민선','신영란','이선','이선이','정혜령','최현정']
 
-# 매니저 소속 (MANAGER.MANAGER_ROLE)
+# 매니저 소속 (MANAGER.MANAGER_AFFILIATION — Snowflake rename 완료)
 AFFILIATION_MAP = {
     "파이낸셜":   "FINANCIAL",
     "인슈어런스": "INSURANCE",
@@ -77,6 +77,9 @@ AFFILIATION_MAP = {
 
 # 탈퇴회원(IS_DELETED=TRUE) 및 테스트 계정 제외
 USER_FILTER = "IS_ASSOCIATE = 0 AND USER_NAME NOT LIKE '%테스트%' AND (IS_DELETED = FALSE OR IS_DELETED IS NULL)"
+
+# 명함 인증 완료 딜러만 집계 (앱 가입자수 / 회원수 통계용)
+USER_FILTER_APPROVED = USER_FILTER + " AND BUSINESS_CARD_STATUS = 'APPROVED'"
 
 # CH_EXPR: cv alias 필요 (counsel_vehicle join 필수, 취소건 등 non-CTE 쿼리용)
 CH_EXPR = """
@@ -277,7 +280,7 @@ with tab1:
                            THEN 1 END) AS this_month,
                 COUNT(*) AS total
             FROM AJDCAR_PROD.PUBLIC.USERS
-            WHERE {USER_FILTER}
+            WHERE {USER_FILTER_APPROVED}
         """).collect()
         return r[0]
 
@@ -289,11 +292,10 @@ with tab1:
             FROM CONTRACT ct
             WHERE ct.CONTRACT_AT::DATE >= DATEADD('DAY', -60, CURRENT_DATE)
         """).collect()
-        t = session.sql("""
+        t = session.sql(f"""
             SELECT COUNT(*) AS total_dealer
             FROM AJDCAR_PROD.PUBLIC.USERS
-            WHERE USER_NAME NOT LIKE '%테스트%'
-              AND (IS_DELETED = FALSE OR IS_DELETED IS NULL)
+            WHERE {USER_FILTER_APPROVED}
         """).collect()
         active = r[0]["ACTIVE_60"]
         total  = t[0]["TOTAL_DEALER"]
@@ -348,7 +350,7 @@ with tab1:
                 COUNT(CASE WHEN DATE_TRUNC('MONTH', CREATED_AT) = DATE_TRUNC('MONTH', CURRENT_DATE)
                            THEN 1 END) AS this_month
             FROM AJDCAR_PROD.PUBLIC.USERS u
-            WHERE {USER_FILTER}
+            WHERE {USER_FILTER_APPROVED}
             GROUP BY 1
         """).to_pandas()
         df.columns = ["g_attr", "cnt", "this_month"]
@@ -539,7 +541,7 @@ with tab1:
             SELECT {grp} AS "기간_str", COUNT(*) AS "가입수"
             FROM AJDCAR_PROD.PUBLIC.USERS
             WHERE CREATED_AT IS NOT NULL
-              AND USER_NAME NOT LIKE '%테스트%'
+              AND {USER_FILTER_APPROVED}
             GROUP BY 1 ORDER BY 1 DESC
         """).to_pandas()
         df.columns = ["기간_str", "가입수"]
@@ -972,6 +974,7 @@ with tab1:
                   AND u.USER_NAME NOT LIKE '%테스트%'
                   AND (u.IS_DELETED = FALSE OR u.IS_DELETED IS NULL)
                   AND u.IS_ASSOCIATE = 0
+                  AND u.BUSINESS_CARD_STATUS = 'APPROVED'
                   {mgr_f} {g_f}
             ),
             joined AS (
@@ -1010,6 +1013,7 @@ with tab1:
                   AND u.USER_NAME NOT LIKE '%테스트%'
                   AND (u.IS_DELETED = FALSE OR u.IS_DELETED IS NULL)
                   AND u.IS_ASSOCIATE = 0
+                  AND u.BUSINESS_CARD_STATUS = 'APPROVED'
                   {mgr_f} {g_f}
             ),
             joined AS (
@@ -1056,6 +1060,7 @@ with tab1:
                   AND u.USER_NAME NOT LIKE '%테스트%'
                   AND (u.IS_DELETED = FALSE OR u.IS_DELETED IS NULL)
                   AND u.IS_ASSOCIATE = 0
+                  AND u.BUSINESS_CARD_STATUS = 'APPROVED'
                   {mgr_f} {g_f}
             )
             SELECT
@@ -2625,7 +2630,7 @@ with tab7:
 
     mgr7_aff_f = (
         "" if mgr7_aff == "전체"
-        else f"AND m.MANAGER_ROLE = '{AFFILIATION_MAP[mgr7_aff]}'"
+        else f"AND m.MANAGER_AFFILIATION = '{AFFILIATION_MAP[mgr7_aff]}'"
     )
 
     CH_LIST = ["갱신", "딜러앱", "CS", "기타"]
@@ -2643,7 +2648,7 @@ with tab7:
             SELECT
                 {grp}                                    AS GRP,
                 COALESCE(m.NAME, '미배정')               AS MGR,
-                COALESCE(m.MANAGER_ROLE, '-')     AS AFF,
+                COALESCE(m.MANAGER_AFFILIATION, '-')     AS AFF,
                 {CH_EXPR_CT}                             AS CH,
                 SUM(ct.CONTRACT_AMOUNT)                  AS FEE,
                 COUNT(*)                                 AS CNT
@@ -3029,7 +3034,7 @@ with tab8:
                 u.SECONDARY_AFFILIATION                     AS BRANCH_NAME,
                 u.CREATED_AT::DATE                          AS CREATED_DT,
                 COALESCE(m.NAME, '-')                       AS MGR_NAME,
-                COALESCE(m.MANAGER_ROLE, '-')        AS MGR_AFF,
+                COALESCE(m.MANAGER_AFFILIATION, '-')        AS MGR_AFF,
                 j.dt_first                                  AS DT_FIRST,
                 j.dt_last                                   AS DT_LAST,
                 COALESCE(j.cnt_total,  0)                   AS CNT_TOTAL,
