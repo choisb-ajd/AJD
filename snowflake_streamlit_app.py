@@ -66,14 +66,15 @@ AXIS_C   = "#333333"
 GRID_C   = "#dddddd"
 BAR_MAIN = "#4c78a8"
 
-MANAGER_LIST = ['김경선','김미희','박순미','송민선','신영란','이선','이선이','정혜령','최현정']
-
 # 매니저 소속 (MANAGER.MANAGER_ROLE — rename 후 MANAGER_AFFILIATION으로 전환 예정)
 AFFILIATION_MAP = {
     "파이낸셜":   "FINANCIAL",
     "인슈어런스": "INSURANCE",
     "파트너스":   "PARTNERS",
 }
+
+# Tab7: 파이낸셜 소속 매니저만 실적 집계 (고정)
+MGR7_AFF_FILTER = "AND m.MANAGER_ROLE = 'FINANCIAL'"
 
 # 탈퇴회원(IS_DELETED=TRUE) 및 테스트 계정 제외
 USER_FILTER = "IS_ASSOCIATE = 0 AND USER_NAME NOT LIKE '%테스트%' AND (IS_DELETED = FALSE OR IS_DELETED IS NULL)"
@@ -573,13 +574,12 @@ with tab1:
     st.markdown('<div class="section-title">상세 분석 (필터)</div>', unsafe_allow_html=True)
 
     default_from = this_month_start - relativedelta(months=4)
-    f1, f2, f3, f4 = st.columns(4)
+    f1, f2, f3 = st.columns(3)
     with f1: date_from = st.date_input("시작일", value=default_from)
     with f2: date_to   = st.date_input("종료일", value=today)
-    with f3: sel_mgr   = st.selectbox("담당매니저", ["전체"] + MANAGER_LIST)
-    with f4: sel_ch    = st.selectbox("영업채널", ["전체", "갱신", "CS", "딜러앱", "기타"])
+    with f3: sel_ch    = st.selectbox("영업채널", ["전체", "갱신", "CS", "딜러앱", "기타"])
 
-    mgr_filter = "" if sel_mgr == "전체" else f"AND m.NAME = '{sel_mgr}'"
+    mgr_filter = ""
     ch_filter  = "" if sel_ch  == "전체" else f"AND ({CH_EXPR_CT}) = '{sel_ch}'"
 
     # ── 체결월별 영업채널 보험료 ───────────────────
@@ -1322,13 +1322,12 @@ with tab2:
     </div>
     """, unsafe_allow_html=True)
 
-    bi1, bi2, bi3, bi4 = st.columns(4)
+    bi1, bi2, bi3 = st.columns(3)
     with bi1: ins_from  = st.date_input("시작일", value=date(today.year, 1, 1), key="ins_from")
     with bi2: ins_to    = st.date_input("종료일", value=today, key="ins_to")
-    with bi3: ins_mgr   = st.selectbox("담당매니저", ["전체"] + MANAGER_LIST, key="ins_mgr")
-    with bi4: ins_sub   = st.selectbox("가입경로", ["전체", "CM", "TM", "오프라인"], key="ins_sub")
+    with bi3: ins_sub   = st.selectbox("가입경로", ["전체", "CM", "TM", "오프라인"], key="ins_sub")
 
-    ins_mgr_f = "" if ins_mgr == "전체" else f"AND m.NAME = '{ins_mgr}'"
+    ins_mgr_f = ""
     _sub_map  = {"CM": "CM", "TM": "TM", "오프라인": "OFFLINE"}
     ins_sub_f = "" if ins_sub == "전체" else f"AND ct.SUBSCRIPTION_TYPE = '{_sub_map[ins_sub]}'"
 
@@ -1611,12 +1610,11 @@ with tab3:
     </div>
     """, unsafe_allow_html=True)
 
-    cc1, cc2, cc3 = st.columns(3)
+    cc1, cc2 = st.columns(2)
     with cc1: cancel_from = st.date_input("시작일", value=date(today.year, 1, 1), key="cancel_from")
     with cc2: cancel_to   = st.date_input("종료일", value=today, key="cancel_to")
-    with cc3: cancel_mgr  = st.selectbox("담당매니저", ["전체"] + MANAGER_LIST, key="cancel_mgr")
 
-    cancel_mgr_f = "" if cancel_mgr == "전체" else f"AND m.NAME = '{cancel_mgr}'"
+    cancel_mgr_f = ""
 
     @st.cache_data(ttl=300)
     def get_cancel_kpi(d_from, d_to, mgr_f):
@@ -1806,23 +1804,18 @@ with tab4:
     </div>
     """, unsafe_allow_html=True)
 
-    ina_cols = st.columns(2)
-    with ina_cols[0]:
-        ina_months = []
-        _d2 = today.replace(day=1)
-        for _ in range(12):
-            ina_months.append(_d2.strftime("%Y-%m"))
-            _d2 = (_d2 - timedelta(days=1)).replace(day=1)
-        ina_base_month = st.selectbox("기준월 선택", ina_months, key="ina_base_month")
-    with ina_cols[1]:
-        ina_mgr = st.selectbox("담당매니저 필터", ["전체"] + MANAGER_LIST, key="ina_mgr")
-
+    ina_months = []
+    _d2 = today.replace(day=1)
+    for _ in range(12):
+        ina_months.append(_d2.strftime("%Y-%m"))
+        _d2 = (_d2 - timedelta(days=1)).replace(day=1)
+    ina_base_month = st.selectbox("기준월 선택", ina_months, key="ina_base_month")
     _iy, _im = int(ina_base_month[:4]), int(ina_base_month[5:7])
     _ild  = calendar.monthrange(_iy, _im)[1]
     ina_base_date = date(_iy, _im, _ild)
     ina_base_str  = ina_base_date.strftime("%Y-%m-%d")
     ina_ref_60    = (ina_base_date - timedelta(days=60)).strftime("%Y-%m-%d")
-    ina_mgr_cond  = "" if ina_mgr == "전체" else f"AND m.NAME = '{ina_mgr}'"
+    ina_mgr_cond  = ""
 
     st.caption(f"기준일: {ina_base_str} / 직전 60일: {ina_ref_60} ~ {ina_base_str}")
 
@@ -2004,12 +1997,11 @@ with tab5:
     </div>
     """, unsafe_allow_html=True)
 
-    cmp1, cmp2, cmp3 = st.columns(3)
+    cmp1, cmp2 = st.columns(2)
     with cmp1: cmp_from = st.date_input("시작일", value=date(today.year, 1, 1), key="cmp_from")
     with cmp2: cmp_to   = st.date_input("종료일", value=today, key="cmp_to")
-    with cmp3: cmp_mgr  = st.selectbox("담당매니저", ["전체"] + MANAGER_LIST, key="cmp_mgr")
 
-    cmp_mgr_f = "" if cmp_mgr == "전체" else f"AND m.NAME = '{cmp_mgr}'"
+    cmp_mgr_f = ""
 
     @st.cache_data(ttl=300)
     def get_cmp_kpi(d_from, d_to, mgr_f):
@@ -2609,14 +2601,16 @@ with tab7:
     st.markdown("""
     <div class="criteria-box">
     📌 <b>집계 기준</b><br>
+    • <b>소속</b>: 파이낸셜(FINANCIAL) 매니저만 집계<br>
     • 영업채널: 갱신(RENEWAL), CS(INBOUND), 딜러앱(DEALER_APP), 기타<br>
-    • 체결 기준: COUNSEL_STATUS = 'JOIN_COMPLETED'<br>
+    • 체결 기준: JOIN_COMPLETED + ACCUMULATE_PENDING<br>
     • 테스트 매니저 제외 / 삭제건 제외
     </div>
     """, unsafe_allow_html=True)
 
-    # ── 필터 ──────────────────────────────────────
-    mf1, mf2, mf3, mf4, mf5 = st.columns(5)
+    # ── 필터 (파이낸셜 소속 매니저 고정) ─────────
+    st.info("📌 파이낸셜 소속 매니저 실적만 집계됩니다.")
+    mf1, mf2, mf3, mf4 = st.columns(4)
     with mf1:
         mgr7_from = st.date_input("시작일", value=today.replace(day=1), key="mgr7_from")
     with mf2:
@@ -2625,13 +2619,8 @@ with tab7:
         mgr7_metric = st.radio("지표", ["원수보험료", "체결건수"], horizontal=True, key="mgr7_metric")
     with mf4:
         mgr7_unit = st.radio("단위", ["월별", "일별"], horizontal=True, key="mgr7_unit")
-    with mf5:
-        mgr7_aff = st.selectbox("소속", ["파이낸셜", "인슈어런스", "파트너스", "전체"], key="mgr7_aff")
 
-    mgr7_aff_f = (
-        "" if mgr7_aff == "전체"
-        else f"AND m.MANAGER_ROLE = '{AFFILIATION_MAP[mgr7_aff]}'"
-    )
+    mgr7_aff_f = MGR7_AFF_FILTER
 
     CH_LIST = ["갱신", "딜러앱", "CS", "기타"]
 
