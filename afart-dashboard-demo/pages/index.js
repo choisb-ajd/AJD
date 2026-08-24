@@ -49,6 +49,15 @@ export async function getStaticProps() {
   };
 }
 
+// "YYYY-MM-DD" 기준으로 n개월 전 달의 1일을 돌려준다 (n=6, 기준일이 8월이면 3월 1일).
+function monthsAgoStart(dateStr, n) {
+  const [y, m] = dateStr.slice(0, 7).split("-").map(Number);
+  const total = y * 12 + (m - 1) - (n - 1);
+  const yy = Math.floor(total / 12);
+  const mm = (total % 12) + 1;
+  return `${yy}-${String(mm).padStart(2, "0")}-01`;
+}
+
 const PERIOD_TABS = [
   { key: "daily", label: "일별" },
   { key: "weekly", label: "주별" },
@@ -87,11 +96,19 @@ export default function Home({
   const agg = useMemo(() => aggregate(scopeRows), [scopeRows]);
   const aggAll = useMemo(() => aggregate(rangeRows), [rangeRows]);
 
+  // 기간별 실적은 상단 날짜 필터와 별개로 항상 "최근 6개월" 추세를 보여준다 (매니저 필터는 그대로 적용).
+  const trendDateFrom = useMemo(() => monthsAgoStart(bounds.max, 6), [bounds.max]);
+  const trendRows = useMemo(
+    () => filterRows(rows, { dateFrom: trendDateFrom, dateTo: bounds.max, manager }),
+    [rows, trendDateFrom, bounds.max, manager]
+  );
+  const trendAgg = useMemo(() => aggregate(trendRows), [trendRows]);
+
   const periodRows = useMemo(() => {
-    const list = agg.periods[period];
+    const list = trendAgg.periods[period];
     const chartSlice = period === "daily" ? list.slice(-30) : list;
     return { table: [...list].reverse(), chart: chartSlice };
-  }, [agg, period]);
+  }, [trendAgg, period]);
 
   const dealerTop = useMemo(() => {
     return [...agg.dealerRank].sort((a, b) => b[dealerSort] - a[dealerSort]).slice(0, 15);
@@ -236,7 +253,10 @@ export default function Home({
               ))}
             </div>
           </div>
-          <p className="section-note">숫자로 확인하는 실적표가 기본이고, 막대(원수보험료)·선(체결건수) 그래프는 추세 파악용 보조 지표입니다.</p>
+          <p className="section-note">
+            숫자로 확인하는 실적표가 기본이고, 막대(원수보험료)·선(체결건수) 그래프는 추세 파악용 보조 지표입니다. 상단 날짜 필터와
+            무관하게 최근 6개월({trendDateFrom} ~ {bounds.max}) 추세를 항상 보여줍니다.
+          </p>
           <div className="card">
             <PeriodChart
               data={periodRows.chart.map((r) => ({
@@ -246,7 +266,7 @@ export default function Home({
               }))}
             />
           </div>
-          <div className="table-wrap" style={{ marginTop: 12 }}>
+          <div className="table-wrap table-scroll" style={{ marginTop: 12 }}>
             <table className="data">
               <thead>
                 <tr>

@@ -542,7 +542,9 @@ footer.foot {
 .race-runner {
   position: absolute;
   top: 50%;
-  transform: translate(-50%, -55%);
+  /* 🏃 emoji는 대부분 폰트에서 왼쪽을 보고 뜁니다 — 좌우 반전해서 실제로
+     오른쪽(더 높은 실적 쪽)으로 달려가는 것처럼 보이게 한다. */
+  transform: translate(-50%, -55%) scaleX(-1);
   font-size: 15px;
   line-height: 1;
   transition: left 0.4s ease;
