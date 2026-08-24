@@ -260,7 +260,9 @@ export default function Home({
           </div>
           <div className="kpi-card">
             <div className="label">원수보험료 합계</div>
-            <div className="value">{formatCompactWon(agg.totals.premiumSum)}</div>
+            <div className="value" style={{ fontSize: 19 }}>
+              {formatWon(agg.totals.premiumSum)}
+            </div>
           </div>
           <div className="kpi-card">
             <div className="label">건당 평균 보험료</div>
