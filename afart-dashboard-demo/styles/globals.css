@@ -521,6 +521,51 @@ footer.foot {
   color: var(--ink-muted);
 }
 
+/* ---------- manager race track ---------- */
+.race-track {
+  position: relative;
+  height: 10px;
+  margin-top: 6px;
+  background: var(--surface-2);
+  border-radius: 999px;
+  overflow: visible;
+}
+.race-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-soft), var(--accent));
+  transition: width 0.4s ease;
+}
+.race-runner {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -55%);
+  font-size: 15px;
+  line-height: 1;
+  transition: left 0.4s ease;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.15));
+}
+@media (prefers-reduced-motion: reduce) {
+  .race-fill,
+  .race-runner {
+    transition: none;
+  }
+}
+
+/* ---------- scrollable table (cap + scroll) ---------- */
+.table-scroll {
+  max-height: 520px;
+  overflow-y: auto;
+}
+.table-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
 @media (max-width: 900px) {
   .search-grid {
     grid-template-columns: 1fr;

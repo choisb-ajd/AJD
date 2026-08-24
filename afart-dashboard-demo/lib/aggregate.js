@@ -105,6 +105,7 @@ export function aggregate(rows) {
   const dealerRank = [...dealerMap.entries()]
     .map(([, list]) => ({
       dealerName: list[0].dealerName,
+      managerName: list[0].managerName,
       count: list.length,
       premiumSum: sumPremium(list),
     }))
