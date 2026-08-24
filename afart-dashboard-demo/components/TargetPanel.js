@@ -20,7 +20,7 @@ function saveTargets(obj) {
   }
 }
 
-export default function TargetPanel({ scopeKey, monthKey, premiumSum }) {
+export default function TargetPanel({ scopeKey, monthKey, premiumSum, defaultTarget = 0 }) {
   const [targets, setTargets] = useState({});
   const [loaded, setLoaded] = useState(false);
 
@@ -30,7 +30,7 @@ export default function TargetPanel({ scopeKey, monthKey, premiumSum }) {
   }, []);
 
   const storeKey = `${scopeKey}|${monthKey}`;
-  const target = targets[storeKey] ?? 0;
+  const target = targets[storeKey] ?? defaultTarget;
 
   const handleChange = (val) => {
     const num = Number(val.replace(/[^0-9]/g, "")) || 0;

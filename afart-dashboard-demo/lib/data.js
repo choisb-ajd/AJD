@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { assignManager, assignGroup } from "./mockAssign";
+import { groupOf } from "./groups";
 
 const CSV_PATH = path.join(process.cwd(), "data", "raw_query.csv");
 
@@ -10,17 +10,22 @@ const HEADER_MAP = [
   "customerId", // 고객ID
   "customerName", // 고객명 (마스킹됨)
   "phone", // 연락처 (마스킹됨)
-  "vin", // 차량차대번호 (이 raw pull은 차량번호/차대번호가 한 컬럼으로 합쳐져 있음)
+  "vin", // 차량차대번호
   "premium", // 보험료
   "insurer", // 가입보험사
   "joinType", // 가입유형 (CM/TM/OFFLINE)
   "insuranceKind", // 보험종류
   "vehicleKind", // 차량구분
   "contractDate", // 체결일자
+  "currentStatus", // 현재상태 (counsel_status)
+  "statusHistory", // 상태전환이력 "A(MM-DD HH:MM) → B(MM-DD HH:MM) → ..."
   "giftName", // 주유권
   "dealerPhone", // 딜러연락처
   "dealerName", // 딜러이름
   "dealerId", // 딜러ID
+  "dealerType", // 딜러유형 (business_type)
+  "dealerStatus", // 딜러상태 (business_card_status)
+  "managerName", // 매니저이름 (counsel_manager)
 ];
 
 function parseCsv(text) {
@@ -51,9 +56,49 @@ function dealerKey(r) {
   return r.dealerId || `${r.dealerName}|${r.dealerPhone}`;
 }
 
+// AFART 앱 회원(딜러) 집계 공통 규칙: 탈퇴(REJECTED)만 제외, APPROVED/PENDING(+미기재)은 포함.
+// 이 raw pull엔 REJECTED가 아직 없어 사실상 전건 포함되지만, 규칙은 그대로 반영해둔다.
+function isEligibleDealer(r) {
+  return r.dealerStatus !== "REJECTED";
+}
+
+// "STATUS(MM-DD HH:MM) → STATUS(MM-DD HH:MM) → ..." 를 순서대로 파싱
+const HISTORY_RE = /([A-Z_]+)\((\d{2}-\d{2} \d{2}:\d{2})\)/g;
+
+function parseHistory(str) {
+  if (!str) return [];
+  return [...str.matchAll(HISTORY_RE)].map((m) => ({ status: m[1], at: m[2] }));
+}
+
+// 이력 타임스탬프엔 연도가 없다 — 이 raw pull은 전부 2026년이라 2026 고정으로 파싱한다.
+function toTime(mmddhhmm) {
+  const [md, hm] = mmddhhmm.split(" ");
+  const [mm, dd] = md.split("-");
+  const [hh, mi] = hm.split(":");
+  return Date.UTC(2026, Number(mm) - 1, Number(dd), Number(hh), Number(mi));
+}
+
+function funnelOf(r) {
+  const events = parseHistory(r.statusHistory);
+  const prospect = events.find((e) => e.status === "PROSPECT_COUNSEL");
+  const comparison = events.find((e) => e.status === "COMPARISON_COMPLETED");
+  const final = events[events.length - 1];
+
+  let prospectToCompDays = null;
+  let compToJoinDays = null;
+  if (comparison) {
+    if (prospect) {
+      prospectToCompDays = Math.max(0, (toTime(comparison.at) - toTime(prospect.at)) / 86400000);
+    }
+    if (final) {
+      compToJoinDays = Math.max(0, (toTime(final.at) - toTime(comparison.at)) / 86400000);
+    }
+  }
+  return { hasComparison: !!comparison, prospectToCompDays, compToJoinDays };
+}
+
 // 빌드 시점에 한 번만 계산해서 클라이언트로 내려줄 가벼운 행 목록을 만든다.
-// 고객명/연락처/차대번호 같은 개인정보는 여기 담지 않는다 — 전체 6천여 건을 브라우저로
-// 보낼 이유가 없고(페이로드도 커짐), 검색은 /api/search 서버 라우트에서 처리한다.
+// 고객명/연락처/차대번호 같은 개인정보는 여기 담지 않는다 — 검색은 /api/search 서버 라우트에서 처리한다.
 //
 // 필드명을 6천여 번 반복하지 않도록(JSON 페이로드 절감) 배열 형태로 내려보내고,
 // 클라이언트에서 unpackRows()로 다시 객체로 복원한다.
@@ -67,41 +112,84 @@ export const CLIENT_ROW_FIELDS = [
   "dealerName",
   "managerName",
   "group",
+  "hasComparison",
+  "prospectToCompDays",
+  "compToJoinDays",
 ];
 
 export function toClientRows(rawRows) {
   return rawRows
-    .filter((r) => r.contractDate)
+    .filter((r) => r.contractDate && isEligibleDealer(r))
     .map((r) => {
-      const dk = dealerKey(r);
+      const f = funnelOf(r);
       return [
         r.contractDate,
         r.premium,
         r.insurer || "미상",
         r.joinType || "기타",
         r.channel || "기타",
-        dk,
+        dealerKey(r),
         r.dealerName || "미상",
-        assignManager(dk),
-        assignGroup(dk).code,
+        r.managerName || "미배정",
+        groupOf(r.dealerType).code,
+        f.hasComparison ? 1 : 0,
+        f.prospectToCompDays,
+        f.compToJoinDays,
       ];
     });
 }
 
-
 // 주유권 발송 리스트는 건수가 적어(수십 건) 필요한 필드를 그대로 내려도 부담이 없다.
 export function toGiftRows(rawRows) {
   return rawRows
-    .filter((r) => r.contractDate && r.giftName)
+    .filter((r) => r.contractDate && r.giftName && isEligibleDealer(r))
+    .map((r) => ({
+      date: r.contractDate,
+      customerName: r.customerName || "",
+      phone: r.phone || "",
+      giftName: r.giftName,
+      dealerName: r.dealerName || "미상",
+      managerName: r.managerName || "미배정",
+    }));
+}
+
+// '지급대기' 전환 리스트 — 현재상태가 ACCUMULATE_PENDING인 실제 건.
+export function toPendingRows(rawRows) {
+  return rawRows
+    .filter((r) => r.currentStatus === "ACCUMULATE_PENDING" && isEligibleDealer(r))
     .map((r) => {
-      const dk = dealerKey(r);
+      const events = parseHistory(r.statusHistory);
+      const last = [...events].reverse().find((e) => e.status === "ACCUMULATE_PENDING");
       return {
         date: r.contractDate,
+        transitionAt: last ? `2026-${last.at.replace(" ", " ")}` : r.contractDate,
         customerName: r.customerName || "",
         phone: r.phone || "",
-        giftName: r.giftName,
+        premium: r.premium,
+        managerName: r.managerName || "미배정",
         dealerName: r.dealerName || "미상",
-        managerName: assignManager(dk),
+      };
+    });
+}
+
+// '가입취소' 이력 리스트 — 이 raw pull은 최종 성사 건만 담고 있어 "현재" 가입취소 상태인 건은 없다.
+// 대신 이력상 가입취소를 겪었다가 재가입으로 마무리된 건을 보여준다.
+export function toCancelledHistoryRows(rawRows) {
+  return rawRows
+    .filter((r) => /JOIN_CANCELLED/.test(r.statusHistory || "") && isEligibleDealer(r))
+    .map((r) => {
+      const events = parseHistory(r.statusHistory);
+      const cancelled = events.find((e) => e.status === "JOIN_CANCELLED");
+      const after = events[events.length - 1];
+      return {
+        date: r.contractDate,
+        cancelledAt: cancelled ? `2026-${cancelled.at.replace(" ", " ")}` : "",
+        recoveredAt: after ? `2026-${after.at.replace(" ", " ")}` : "",
+        customerName: r.customerName || "",
+        phone: r.phone || "",
+        premium: r.premium,
+        managerName: r.managerName || "미배정",
+        finalStatus: r.currentStatus,
       };
     });
 }

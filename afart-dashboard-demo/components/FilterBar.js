@@ -1,5 +1,3 @@
-import { MOCK_MANAGERS } from "../lib/mockAssign";
-
 export default function FilterBar({
   dateFrom,
   dateTo,
@@ -7,9 +5,9 @@ export default function FilterBar({
   onDateTo,
   manager,
   onManager,
+  managers,
   bounds,
   onReset,
-  scopeLabel,
 }) {
   return (
     <div className="filter-bar">
@@ -38,7 +36,7 @@ export default function FilterBar({
         <label>매니저</label>
         <select value={manager} onChange={(e) => onManager(e.target.value)}>
           <option value="ALL">전체 (관리자 보기)</option>
-          {MOCK_MANAGERS.map((m) => (
+          {managers.map((m) => (
             <option key={m} value={m}>
               {m}
             </option>

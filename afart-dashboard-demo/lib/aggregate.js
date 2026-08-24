@@ -120,7 +120,7 @@ export function aggregate(rows) {
     .map(([channel, list]) => ({ channel, count: list.length, premiumSum: sumPremium(list) }))
     .sort((a, b) => b.count - a.count);
 
-  // 매니저별 (샘플 배정)
+  // 매니저별 (실제 counsel_manager 기준)
   const managerMap = new Map();
   for (const r of rows) {
     if (!managerMap.has(r.managerName)) managerMap.set(r.managerName, []);
@@ -135,12 +135,25 @@ export function aggregate(rows) {
     }))
     .sort((a, b) => b.premiumSum - a.premiumSum);
 
-  // 그룹별 (샘플 배정) - 배정 딜러 수 기준
+  // 딜러유형 그룹별 (실제 business_type 기준) - 배정 딜러 수
   const groupMap = new Map();
   for (const r of rows) {
     if (!groupMap.has(r.group)) groupMap.set(r.group, new Set());
     groupMap.get(r.group).add(r.dealerKey);
   }
+
+  // 비견(비교견적완료) 퍼널 — 이 raw pull은 성사된 건만 담고 있어 "손실 포함 전환율"은 계산할 수 없다.
+  // 대신 체결 건 중 비교견적 단계를 거친 비율과, 단계별 평균 소요일을 본다.
+  const comparisonRows = rows.filter((r) => r.hasComparison);
+  const avg = (arr) => (arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : null);
+  const funnel = {
+    comparisonCount: comparisonRows.length,
+    comparisonRate: totals.count ? (comparisonRows.length / totals.count) * 100 : 0,
+    avgProspectToCompDays: avg(
+      comparisonRows.map((r) => r.prospectToCompDays).filter((v) => v != null)
+    ),
+    avgCompToJoinDays: avg(comparisonRows.map((r) => r.compToJoinDays).filter((v) => v != null)),
+  };
 
   return {
     totals,
@@ -150,23 +163,32 @@ export function aggregate(rows) {
     byChannel,
     managerRank,
     groupDealerCount: groupMap,
+    funnel,
   };
 }
 
-// 주유권 리스트 전용 — toGiftRows()가 만든 소량의 행을 기간/매니저로 거른다.
-export function filterGiftRows(giftRows, { dateFrom, dateTo, manager }) {
-  const list = giftRows.filter((r) => {
-    if (dateFrom && r.date < dateFrom) return false;
-    if (dateTo && r.date > dateTo) return false;
-    if (manager && manager !== "ALL" && r.managerName !== manager) return false;
-    return true;
-  });
+// 주유권/지급대기/가입취소처럼 건수가 적은 리스트형 데이터를 기간·매니저로 거르는 공용 함수.
+// (건 단위 배열이면 무엇이든 재사용 — 각 항목은 date, managerName 필드를 가진다고 가정)
+export function filterListRows(list, { dateFrom, dateTo, manager }) {
+  return list
+    .filter((r) => {
+      if (dateFrom && r.date < dateFrom) return false;
+      if (dateTo && r.date > dateTo) return false;
+      if (manager && manager !== "ALL" && r.managerName !== manager) return false;
+      return true;
+    })
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
+// 주유권 리스트 전용 — filterListRows에 권종별 요약을 더한다.
+export function filterGiftRows(giftRows, filters) {
+  const list = filterListRows(giftRows, filters);
   const summaryMap = new Map();
   for (const r of list) summaryMap.set(r.giftName, (summaryMap.get(r.giftName) || 0) + 1);
   return {
     summary: [...summaryMap.entries()]
       .map(([giftName, count]) => ({ giftName, count }))
       .sort((a, b) => b.count - a.count),
-    list: [...list].sort((a, b) => (a.date < b.date ? 1 : -1)),
+    list,
   };
 }
