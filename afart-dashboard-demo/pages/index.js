@@ -58,6 +58,27 @@ function monthsAgoStart(dateStr, n) {
   return `${yy}-${String(mm).padStart(2, "0")}-01`;
 }
 
+function addDays(dateStr, delta) {
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
+function daysBetween(fromStr, toStr) {
+  return Math.round((new Date(toStr + "T00:00:00Z") - new Date(fromStr + "T00:00:00Z")) / 86400000) + 1;
+}
+
+function diffPct(curr, prev) {
+  if (!prev) return null;
+  return ((curr - prev) / prev) * 100;
+}
+
+function deltaLabel(pct) {
+  if (pct == null) return "비교 불가 (직전 동기간 데이터 없음)";
+  const arrow = pct >= 0 ? "▲" : "▼";
+  return `${arrow} ${Math.abs(pct).toFixed(1)}%`;
+}
+
 const PERIOD_TABS = [
   { key: "daily", label: "일별" },
   { key: "weekly", label: "주별" },
@@ -96,13 +117,33 @@ export default function Home({
   const agg = useMemo(() => aggregate(scopeRows), [scopeRows]);
   const aggAll = useMemo(() => aggregate(rangeRows), [rangeRows]);
 
-  // 기간별 실적은 상단 날짜 필터와 별개로 항상 "최근 6개월" 추세를 보여준다 (매니저 필터는 그대로 적용).
-  const trendDateFrom = useMemo(() => monthsAgoStart(bounds.max, 6), [bounds.max]);
+  // 기간별 실적은 상단 날짜 필터와 별개로 자체 윈도우를 쓴다 (매니저 필터는 그대로 적용):
+  // 월별 탭은 최근 6개월, 일별/주별 탭은 최근 1개월.
+  const sixMonthsStart = useMemo(() => monthsAgoStart(bounds.max, 6), [bounds.max]);
+  const oneMonthStart = useMemo(() => monthsAgoStart(bounds.max, 1), [bounds.max]);
+  const trendDateFrom = period === "monthly" ? sixMonthsStart : oneMonthStart;
   const trendRows = useMemo(
     () => filterRows(rows, { dateFrom: trendDateFrom, dateTo: bounds.max, manager }),
     [rows, trendDateFrom, bounds.max, manager]
   );
   const trendAgg = useMemo(() => aggregate(trendRows), [trendRows]);
+
+  // 직전 동기간(같은 길이의 바로 이전 구간) 대비 증감
+  const prevWindowTo = addDays(trendDateFrom, -1);
+  const prevWindowFrom = addDays(prevWindowTo, -(daysBetween(trendDateFrom, bounds.max) - 1));
+  const prevRows = useMemo(
+    () => filterRows(rows, { dateFrom: prevWindowFrom, dateTo: prevWindowTo, manager }),
+    [rows, prevWindowFrom, prevWindowTo, manager]
+  );
+  const prevAgg = useMemo(() => aggregate(prevRows), [prevRows]);
+  const periodComparison = {
+    prevFrom: prevWindowFrom,
+    prevTo: prevWindowTo,
+    premiumPct: diffPct(trendAgg.totals.premiumSum, prevAgg.totals.premiumSum),
+    countPct: diffPct(trendAgg.totals.count, prevAgg.totals.count),
+    // 데이터가 2026-01-02부터 시작이라, 6개월 윈도우의 "직전 6개월"은 실제 데이터가 일부만 있다.
+    incomplete: prevWindowFrom < bounds.min,
+  };
 
   const periodRows = useMemo(() => {
     const list = trendAgg.periods[period];
@@ -255,8 +296,24 @@ export default function Home({
           </div>
           <p className="section-note">
             숫자로 확인하는 실적표가 기본이고, 막대(원수보험료)·선(체결건수) 그래프는 추세 파악용 보조 지표입니다. 상단 날짜 필터와
-            무관하게 최근 6개월({trendDateFrom} ~ {bounds.max}) 추세를 항상 보여줍니다.
+            무관하게 {period === "monthly" ? "최근 6개월" : "최근 1개월"}({trendDateFrom} ~ {bounds.max}) 추세를 보여줍니다.
           </p>
+          <div className="compare-row">
+            <span className="compare-label">
+              직전 동기간({periodComparison.prevFrom} ~ {periodComparison.prevTo}) 대비
+            </span>
+            <span className={`compare-value ${periodComparison.premiumPct != null && periodComparison.premiumPct < 0 ? "down" : "up"}`}>
+              원수보험료 {deltaLabel(periodComparison.premiumPct)}
+            </span>
+            <span className={`compare-value ${periodComparison.countPct != null && periodComparison.countPct < 0 ? "down" : "up"}`}>
+              체결건수 {deltaLabel(periodComparison.countPct)}
+            </span>
+            {periodComparison.incomplete && (
+              <span style={{ color: "var(--ink-faint)" }}>
+                ⚠ 데이터가 {bounds.min}부터 시작이라 직전 구간 일부는 실적이 비어 있어 증감률이 부풀려져 보일 수 있습니다
+              </span>
+            )}
+          </div>
           <div className="card">
             <PeriodChart
               data={periodRows.chart.map((r) => ({
