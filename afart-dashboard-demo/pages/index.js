@@ -64,15 +64,18 @@ export default function Home({
   bounds,
 }) {
   const rows = useMemo(() => unpackRows(packedRows), [packedRows]);
-  const [dateFrom, setDateFrom] = useState(bounds.min);
-  const [dateTo, setDateTo] = useState(bounds.max);
+  // 기본 기간 = 이번 달 1일 ~ 오늘(=데이터상 최신일). bounds.min/max는 date input의 선택 가능 범위로만 쓴다.
+  const defaultDateTo = bounds.max;
+  const defaultDateFrom = `${defaultDateTo.slice(0, 7)}-01`;
+  const [dateFrom, setDateFrom] = useState(defaultDateFrom);
+  const [dateTo, setDateTo] = useState(defaultDateTo);
   const [manager, setManager] = useState("ALL");
   const [period, setPeriod] = useState("monthly");
   const [dealerSort, setDealerSort] = useState("premiumSum");
 
   const resetFilters = () => {
-    setDateFrom(bounds.min);
-    setDateTo(bounds.max);
+    setDateFrom(defaultDateFrom);
+    setDateTo(defaultDateTo);
     setManager("ALL");
   };
 
@@ -83,13 +86,6 @@ export default function Home({
 
   const agg = useMemo(() => aggregate(scopeRows), [scopeRows]);
   const aggAll = useMemo(() => aggregate(rangeRows), [rangeRows]);
-
-  // 목표매출/인센티브는 필터로 잘린 기간이 아니라 "선택된 매니저(또는 전체)의 최근 달" 실적을 기준으로 본다
-  const managerFullRows = useMemo(() => filterRows(rows, { manager }), [rows, manager]);
-  const aggManagerFull = useMemo(() => aggregate(managerFullRows), [managerFullRows]);
-  const latestMonthKey = bounds.max.slice(0, 7);
-  const latestMonthPremium =
-    aggManagerFull.periods.monthly.find((m) => m.key === latestMonthKey)?.premiumSum || 0;
 
   const periodRows = useMemo(() => {
     const list = agg.periods[period];
@@ -124,6 +120,8 @@ export default function Home({
     () => filterListRows(cancelledRows, { dateFrom, dateTo, manager }),
     [cancelledRows, dateFrom, dateTo, manager]
   );
+
+  const renewalsInRange = RENEWAL_TODAY_SAMPLE.filter((r) => r.dueDate >= dateFrom && r.dueDate <= dateTo);
 
   return (
     <>
@@ -328,21 +326,21 @@ export default function Home({
         <div className="grid-2">
           <section className="section">
             <div className="section-head">
-              <h2>{latestMonthKey} 목표매출 달성률</h2>
+              <h2>선택 기간 목표매출 달성률</h2>
             </div>
             <TargetPanel
               scopeKey={manager}
-              monthKey={latestMonthKey}
-              premiumSum={latestMonthPremium}
+              rangeKey={`${dateFrom}~${dateTo}`}
+              premiumSum={agg.totals.premiumSum}
               defaultTarget={manager === "ALL" ? COMPANY_MONTHLY_TARGET : 0}
             />
           </section>
           <section className="section">
             <div className="section-head">
-              <h2>이번달 예상 인센티브</h2>
+              <h2>선택 기간 예상 인센티브</h2>
               <MockBadge>샘플 요율</MockBadge>
             </div>
-            <IncentivePanel premiumSum={latestMonthPremium} />
+            <IncentivePanel premiumSum={agg.totals.premiumSum} />
           </section>
         </div>
 
@@ -503,7 +501,14 @@ export default function Home({
                 </tr>
               </thead>
               <tbody>
-                {RENEWAL_TODAY_SAMPLE.map((r, i) => (
+                {renewalsInRange.length === 0 && (
+                  <tr>
+                    <td colSpan={5} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                      선택한 기간엔 갱신 예정 건이 없습니다.
+                    </td>
+                  </tr>
+                )}
+                {renewalsInRange.map((r, i) => (
                   <tr key={i}>
                     <td>{r.dueDate}</td>
                     <td style={{ textAlign: "left" }}>{r.customerName}</td>
