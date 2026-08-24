@@ -1,12 +1,19 @@
 import { useMemo, useState } from "react";
 import Head from "next/head";
-import { loadRawRows, toClientRows, toGiftRows } from "../lib/data";
+import {
+  loadRawRows,
+  toClientRows,
+  toGiftRows,
+  toPendingRows,
+  toCancelledHistoryRows,
+} from "../lib/data";
 import { unpackRows } from "../lib/pack";
-import { aggregate, filterRows, filterGiftRows } from "../lib/aggregate";
+import { aggregate, filterRows, filterGiftRows, filterListRows } from "../lib/aggregate";
 import {
   formatWon,
   formatCompactWon,
   formatCount,
+  formatPercent,
   formatDateLabel,
 } from "../lib/format";
 import PeriodChart from "../components/PeriodChart";
@@ -15,21 +22,31 @@ import SearchPanel from "../components/SearchPanel";
 import TargetPanel from "../components/TargetPanel";
 import IncentivePanel from "../components/IncentivePanel";
 import MockBadge from "../components/MockBadge";
-import { GROUPS } from "../lib/mockAssign";
-import {
-  generateAppSignups,
-  RENEWAL_TODAY_SAMPLE,
-  ACCUMULATE_PENDING_SAMPLE,
-  JOIN_CANCELLED_SAMPLE,
-} from "../lib/mockData";
+import { GROUPS } from "../lib/groups";
+import { generateAppSignups, RENEWAL_TODAY_SAMPLE } from "../lib/mockData";
+
+const COMPANY_MONTHLY_TARGET = 1_000_000_000; // 원수보험료 기준 월 목표 10억원 (직접 전달받은 값)
 
 export async function getStaticProps() {
   const raw = loadRawRows();
-  const packedRows = toClientRows(raw); // [date, premium, insurer, joinType, channel, dealerKey, dealerName, managerName, group][]
+  // [date, premium, insurer, joinType, channel, dealerKey, dealerName, managerName, group, hasComparison, prospectToCompDays, compToJoinDays][]
+  const packedRows = toClientRows(raw);
   const giftRows = toGiftRows(raw);
+  const pendingRows = toPendingRows(raw);
+  const cancelledRows = toCancelledHistoryRows(raw);
   const dateMin = packedRows.reduce((m, r) => (m === "" || r[0] < m ? r[0] : m), "");
   const dateMax = packedRows.reduce((m, r) => (m === "" || r[0] > m ? r[0] : m), "");
-  return { props: { packedRows, giftRows, bounds: { min: dateMin, max: dateMax } } };
+  const managers = [...new Set(raw.map((r) => r.managerName).filter(Boolean))].sort();
+  return {
+    props: {
+      packedRows,
+      giftRows,
+      pendingRows,
+      cancelledRows,
+      managers,
+      bounds: { min: dateMin, max: dateMax },
+    },
+  };
 }
 
 const PERIOD_TABS = [
@@ -38,7 +55,14 @@ const PERIOD_TABS = [
   { key: "monthly", label: "월별" },
 ];
 
-export default function Home({ packedRows, giftRows, bounds }) {
+export default function Home({
+  packedRows,
+  giftRows,
+  pendingRows,
+  cancelledRows,
+  managers,
+  bounds,
+}) {
   const rows = useMemo(() => unpackRows(packedRows), [packedRows]);
   const [dateFrom, setDateFrom] = useState(bounds.min);
   const [dateTo, setDateTo] = useState(bounds.max);
@@ -53,24 +77,15 @@ export default function Home({ packedRows, giftRows, bounds }) {
   };
 
   // 날짜만 적용 (매니저 랭킹처럼 전체 매니저를 비교할 때 사용)
-  const rangeRows = useMemo(
-    () => filterRows(rows, { dateFrom, dateTo }),
-    [rows, dateFrom, dateTo]
-  );
+  const rangeRows = useMemo(() => filterRows(rows, { dateFrom, dateTo }), [rows, dateFrom, dateTo]);
   // 날짜 + 매니저 둘 다 적용 (관리자=전체 / 매니저=본인 화면 대부분이 이걸 씀)
-  const scopeRows = useMemo(
-    () => filterRows(rangeRows, { manager }),
-    [rangeRows, manager]
-  );
+  const scopeRows = useMemo(() => filterRows(rangeRows, { manager }), [rangeRows, manager]);
 
   const agg = useMemo(() => aggregate(scopeRows), [scopeRows]);
   const aggAll = useMemo(() => aggregate(rangeRows), [rangeRows]);
 
   // 목표매출/인센티브는 필터로 잘린 기간이 아니라 "선택된 매니저(또는 전체)의 최근 달" 실적을 기준으로 본다
-  const managerFullRows = useMemo(
-    () => filterRows(rows, { manager }),
-    [rows, manager]
-  );
+  const managerFullRows = useMemo(() => filterRows(rows, { manager }), [rows, manager]);
   const aggManagerFull = useMemo(() => aggregate(managerFullRows), [managerFullRows]);
   const latestMonthKey = bounds.max.slice(0, 7);
   const latestMonthPremium =
@@ -101,6 +116,14 @@ export default function Home({ packedRows, giftRows, bounds }) {
     () => filterGiftRows(giftRows, { dateFrom, dateTo, manager }),
     [giftRows, dateFrom, dateTo, manager]
   );
+  const pending = useMemo(
+    () => filterListRows(pendingRows, { dateFrom, dateTo, manager }),
+    [pendingRows, dateFrom, dateTo, manager]
+  );
+  const cancelled = useMemo(
+    () => filterListRows(cancelledRows, { dateFrom, dateTo, manager }),
+    [cancelledRows, dateFrom, dateTo, manager]
+  );
 
   return (
     <>
@@ -130,16 +153,19 @@ export default function Home({ packedRows, giftRows, bounds }) {
         onDateTo={setDateTo}
         manager={manager}
         onManager={setManager}
+        managers={managers}
         bounds={bounds}
         onReset={resetFilters}
       />
 
       <div className="demo-banner">
         <b>예시 페이지입니다.</b> raw 쿼리 데이터(원본 {formatCount(rows.length)}, 현재 필터 {formatCount(scopeRows.length)})로
-        만든 프로토타입입니다. <MockBadge /> 표시가 붙은 영역은 이 raw 데이터에 없는 값이라 시연을 위해 만든 샘플입니다.
+        만든 프로토타입입니다. 매니저·딜러유형·상태이력·지급대기/가입취소는 실제 데이터를 그대로 씁니다. <MockBadge /> 표시가 붙은
+        영역만 이 raw 데이터에 없는 값이라 시연을 위해 만든 샘플입니다.
         <ul>
-          <li>매니저 배정, G1~G5 그룹, 앱가입현황, 갱신/지급대기/가입취소 리스트, 인센티브 요율은 전부 샘플/가상 데이터입니다.</li>
-          <li>실제 매니저·딜러유형·상태이력 데이터는 배치도 문서의 데이터 매핑을 참고해 DB에서 조회해야 합니다.</li>
+          <li>앱가입현황, 하루 갱신 건, 인센티브 요율은 이 raw pull에 아예 없는 값이라 샘플로 대체했습니다.</li>
+          <li>신차딜러는 business_sub_type(수입/국산)이 없어 하나로 묶었습니다 — 원래 배치도의 G1/G2 세분화는 불가합니다.</li>
+          <li>비견 퍼널의 "전환율"은 이 raw pull이 이미 성사된 건만 담고 있어, 손실 건을 포함한 진짜 전환율이 아니라 "체결 건 중 비교견적을 거친 비율"입니다.</li>
         </ul>
       </div>
 
@@ -157,7 +183,10 @@ export default function Home({ packedRows, giftRows, bounds }) {
         <div className="kpi-row">
           <div className="kpi-card">
             <div className="label">체결건수 합계</div>
-            <div className="value">{agg.totals.count.toLocaleString("ko-KR")}<span className="unit">건</span></div>
+            <div className="value">
+              {agg.totals.count.toLocaleString("ko-KR")}
+              <span className="unit">건</span>
+            </div>
           </div>
           <div className="kpi-card">
             <div className="label">원수보험료 합계</div>
@@ -169,7 +198,10 @@ export default function Home({ packedRows, giftRows, bounds }) {
           </div>
           <div className="kpi-card">
             <div className="label">{manager === "ALL" ? "활동 딜러 수" : "담당 딜러 수"}</div>
-            <div className="value">{agg.totals.dealerCount.toLocaleString("ko-KR")}<span className="unit">명</span></div>
+            <div className="value">
+              {agg.totals.dealerCount.toLocaleString("ko-KR")}
+              <span className="unit">명</span>
+            </div>
           </div>
         </div>
 
@@ -240,11 +272,10 @@ export default function Home({ packedRows, giftRows, bounds }) {
 
         <section className="section">
           <div className="section-head">
-            <h2>매니저별 실적 랭킹 (일·주·월 총계 동일 로직)</h2>
-            <MockBadge>샘플 매니저 배정</MockBadge>
+            <h2>매니저별 실적 랭킹</h2>
           </div>
           <p className="section-note">
-            딜러ID를 해시해서 만든 가상 매니저 배정입니다. 실제로는 counsel_application.counsel_manager_id 기준입니다. 선택한 기간 전체 매니저를 비교합니다.
+            counsel_manager 기준 실제 데이터입니다. 선택한 기간의 전체 매니저를 비교하며, 필터에서 매니저를 고르면 해당 행이 강조됩니다.
           </p>
           <div className="card">
             {aggAll.managerRank.map((m, i) => (
@@ -261,6 +292,39 @@ export default function Home({ packedRows, giftRows, bounds }) {
           </div>
         </section>
 
+        <section className="section">
+          <div className="section-head">
+            <h2>비견(비교견적완료) 퍼널{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
+          </div>
+          <p className="section-note">
+            상태전환이력을 파싱해 만든 실제 지표입니다. 다만 이 raw pull은 이미 성사된 건만 담고 있어, "비견 후 이탈"까지 포함한 진짜
+            전환율은 계산할 수 없습니다 — 아래 비율은 체결 건 중 비교견적 단계를 거친 비중입니다.
+          </p>
+          <div className="kpi-row" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+            <div className="kpi-card">
+              <div className="label">비견 경유 체결 (전체 대비)</div>
+              <div className="value">
+                {formatCount(agg.funnel.comparisonCount)}
+                <span className="unit">{formatPercent(agg.funnel.comparisonRate)}</span>
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">가망상담 → 비견 평균 소요일</div>
+              <div className="value">
+                {agg.funnel.avgProspectToCompDays != null ? agg.funnel.avgProspectToCompDays.toFixed(1) : "-"}
+                <span className="unit">일</span>
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">비견 → 체결 평균 소요일</div>
+              <div className="value">
+                {agg.funnel.avgCompToJoinDays != null ? agg.funnel.avgCompToJoinDays.toFixed(1) : "-"}
+                <span className="unit">일</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <div className="grid-2">
           <section className="section">
             <div className="section-head">
@@ -270,6 +334,7 @@ export default function Home({ packedRows, giftRows, bounds }) {
               scopeKey={manager}
               monthKey={latestMonthKey}
               premiumSum={latestMonthPremium}
+              defaultTarget={manager === "ALL" ? COMPANY_MONTHLY_TARGET : 0}
             />
           </section>
           <section className="section">
@@ -283,15 +348,14 @@ export default function Home({ packedRows, giftRows, bounds }) {
 
         <section className="section">
           <div className="section-head">
-            <h2>G1~G5 그룹별 배정 회원수{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
-            <MockBadge>샘플 그룹 배정</MockBadge>
+            <h2>딜러유형별 배정 회원수{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
           </div>
-          <p className="section-note">딜러유형(business_type) 데이터가 없어 딜러ID 해시로 임의 배정한 그룹입니다.</p>
+          <p className="section-note">business_type 실제 데이터입니다. 신차딜러는 business_sub_type이 없어 수입/국산으로 나누지 못합니다.</p>
           <div className="table-wrap">
             <table className="data">
               <thead>
                 <tr>
-                  <th>그룹</th>
+                  <th>딜러유형</th>
                   <th>배정 회원수</th>
                 </tr>
               </thead>
@@ -309,9 +373,7 @@ export default function Home({ packedRows, giftRows, bounds }) {
 
         <section className="section">
           <div className="section-head">
-            <h2>
-              가입 보험사 × 가입유형(CM/TM)별 원수보험료{manager !== "ALL" ? ` — ${manager}` : ""}
-            </h2>
+            <h2>가입 보험사 × 가입유형(CM/TM)별 원수보험료{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
           </div>
           <div className="table-wrap">
             <table className="data">
@@ -459,8 +521,8 @@ export default function Home({ packedRows, giftRows, bounds }) {
           <section className="section">
             <div className="section-head">
               <h2>'지급대기' 전환 고객 리스트</h2>
-              <MockBadge />
             </div>
+            <p className="section-note">현재상태 = ACCUMULATE_PENDING 실제 데이터입니다.</p>
             <div className="table-wrap">
               <table className="data">
                 <thead>
@@ -473,7 +535,14 @@ export default function Home({ packedRows, giftRows, bounds }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {ACCUMULATE_PENDING_SAMPLE.map((r, i) => (
+                  {pending.length === 0 && (
+                    <tr>
+                      <td colSpan={5} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                        해당 조건에 지급대기 건이 없습니다.
+                      </td>
+                    </tr>
+                  )}
+                  {pending.map((r, i) => (
                     <tr key={i}>
                       <td>{r.transitionAt}</td>
                       <td style={{ textAlign: "left" }}>{r.customerName}</td>
@@ -489,27 +558,37 @@ export default function Home({ packedRows, giftRows, bounds }) {
 
           <section className="section">
             <div className="section-head">
-              <h2>'가입취소' 전환 고객 리스트</h2>
-              <MockBadge />
+              <h2>'가입취소' 이력이 있는 건</h2>
             </div>
+            <p className="section-note">
+              이 raw pull은 최종 성사 건만 담고 있어 현재 가입취소 상태인 건은 없습니다. 대신 이력상 가입취소 후 재가입으로 마무리된
+              실제 사례입니다.
+            </p>
             <div className="table-wrap">
               <table className="data">
                 <thead>
                   <tr>
-                    <th>전환일시</th>
+                    <th>가입취소일시</th>
                     <th>고객명</th>
                     <th>연락처</th>
-                    <th>사유</th>
+                    <th>재가입일시</th>
                     <th>매니저</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {JOIN_CANCELLED_SAMPLE.map((r, i) => (
+                  {cancelled.length === 0 && (
+                    <tr>
+                      <td colSpan={5} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                        해당 조건에 가입취소 이력이 없습니다.
+                      </td>
+                    </tr>
+                  )}
+                  {cancelled.map((r, i) => (
                     <tr key={i}>
-                      <td>{r.transitionAt}</td>
+                      <td>{r.cancelledAt}</td>
                       <td style={{ textAlign: "left" }}>{r.customerName}</td>
                       <td>{r.phone}</td>
-                      <td>{r.reason}</td>
+                      <td>{r.recoveredAt}</td>
                       <td>{r.managerName}</td>
                     </tr>
                   ))}
@@ -567,7 +646,8 @@ export default function Home({ packedRows, giftRows, bounds }) {
         <div className="scope-out">
           <h3>실제 서비스 전환 시 필요한 것</h3>
           <ul>
-            <li><MockBadge /> 표시가 붙은 모든 섹션은 실제 DB 테이블(매니저 배정, 딜러유형, users, counsel_status_log, 목표매출·인센티브 정책 테이블)로 교체 필요</li>
+            <li><MockBadge /> 표시가 붙은 섹션(앱가입현황, 하루 갱신 건, 인센티브 요율)은 실제 데이터 소스가 생기기 전까지 샘플입니다</li>
+            <li>매니저별 목표매출은 전사 목표(10억)만 반영했고, 개별 목표는 입력 UI만 만들어뒀습니다 — 값 저장은 브라우저 로컬에만 됩니다</li>
             <li>주민번호 검색은 이 raw 데이터에 원천적으로 없어, 실제 서비스에서도 암호화된 customer_rrn 처리 방식을 먼저 정해야 함</li>
             <li>자세한 데이터 매핑·조인 기준은 별도 공유된 배치도 문서를 참고</li>
           </ul>
