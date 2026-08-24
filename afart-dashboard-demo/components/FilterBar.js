@@ -30,6 +30,30 @@ export default function FilterBar({
             onChange={(e) => onDateTo(e.target.value)}
           />
         </div>
+        <div className="row" style={{ marginTop: 4 }}>
+          <button
+            type="button"
+            className="filter-reset"
+            style={{ padding: "2px 4px" }}
+            onClick={() => {
+              onDateFrom(`${bounds.max.slice(0, 7)}-01`);
+              onDateTo(bounds.max);
+            }}
+          >
+            이번달
+          </button>
+          <button
+            type="button"
+            className="filter-reset"
+            style={{ padding: "2px 4px" }}
+            onClick={() => {
+              onDateFrom(bounds.min);
+              onDateTo(bounds.max);
+            }}
+          >
+            전체 기간
+          </button>
+        </div>
       </div>
 
       <div className="filter-field">

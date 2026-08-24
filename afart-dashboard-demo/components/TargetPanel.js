@@ -20,7 +20,7 @@ function saveTargets(obj) {
   }
 }
 
-export default function TargetPanel({ scopeKey, monthKey, premiumSum, defaultTarget = 0 }) {
+export default function TargetPanel({ scopeKey, rangeKey, premiumSum, defaultTarget = 0 }) {
   const [targets, setTargets] = useState({});
   const [loaded, setLoaded] = useState(false);
 
@@ -29,7 +29,7 @@ export default function TargetPanel({ scopeKey, monthKey, premiumSum, defaultTar
     setLoaded(true);
   }, []);
 
-  const storeKey = `${scopeKey}|${monthKey}`;
+  const storeKey = `${scopeKey}|${rangeKey}`;
   const target = targets[storeKey] ?? defaultTarget;
 
   const handleChange = (val) => {
@@ -44,7 +44,7 @@ export default function TargetPanel({ scopeKey, monthKey, premiumSum, defaultTar
   return (
     <div className="card">
       <div className="target-row">
-        <span style={{ color: "var(--ink-muted)" }}>{monthKey} 목표매출</span>
+        <span style={{ color: "var(--ink-muted)" }}>선택 기간 목표매출</span>
         <input
           type="text"
           inputMode="numeric"
