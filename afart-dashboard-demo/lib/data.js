@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { assignManager, assignGroup } from "./mockAssign";
 
 const CSV_PATH = path.join(process.cwd(), "data", "raw_query.csv");
 
@@ -9,7 +10,7 @@ const HEADER_MAP = [
   "customerId", // 고객ID
   "customerName", // 고객명 (마스킹됨)
   "phone", // 연락처 (마스킹됨)
-  "vin", // 차량차대번호
+  "vin", // 차량차대번호 (이 raw pull은 차량번호/차대번호가 한 컬럼으로 합쳐져 있음)
   "premium", // 보험료
   "insurer", // 가입보험사
   "joinType", // 가입유형 (CM/TM/OFFLINE)
@@ -44,177 +45,63 @@ export function loadRawRows() {
   return parseCsv(text);
 }
 
-// ---- helpers ----
-
-function isoWeekInfo(dateStr) {
-  const d = new Date(dateStr + "T00:00:00Z");
-  const day = (d.getUTCDay() + 6) % 7; // Mon=0 .. Sun=6
-  const monday = new Date(d);
-  monday.setUTCDate(d.getUTCDate() - day);
-  const sunday = new Date(monday);
-  sunday.setUTCDate(monday.getUTCDate() + 6);
-  const fmt = (x) =>
-    `${String(x.getUTCMonth() + 1).padStart(2, "0")}/${String(
-      x.getUTCDate()
-    ).padStart(2, "0")}`;
-  const key = monday.toISOString().slice(0, 10);
-  return { key, label: `${fmt(monday)}~${fmt(sunday)}` };
-}
-
-function monthOf(dateStr) {
-  return dateStr.slice(0, 7); // YYYY-MM
-}
-
-function sumPremium(rows) {
-  return rows.reduce((acc, r) => acc + (r.premium || 0), 0);
-}
-
-function bucketBy(rows, keyFn, labelFn) {
-  const map = new Map();
-  for (const r of rows) {
-    if (!r.contractDate) continue;
-    const key = keyFn(r);
-    if (!map.has(key)) map.set(key, []);
-    map.get(key).push(r);
-  }
-  const out = [...map.entries()].map(([key, list]) => {
-    const premiumSum = sumPremium(list);
-    const withPremium = list.filter((r) => r.premium != null).length;
-    return {
-      key,
-      label: labelFn ? labelFn(key, list) : key,
-      count: list.length,
-      premiumSum,
-      avgPremium: withPremium > 0 ? Math.round(premiumSum / withPremium) : 0,
-    };
-  });
-  out.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-  return out;
-}
-
 function dealerKey(r) {
   // 딜러ID가 비어있는 행이 있고, 마스킹된 딜러이름은 서로 다른 사람이 겹칠 수 있어
   // ID가 있으면 ID로, 없으면 이름+연락처로 묶는다.
   return r.dealerId || `${r.dealerName}|${r.dealerPhone}`;
 }
 
-export function aggregate(rows) {
-  const clean = rows.filter((r) => r.contractDate);
+// 빌드 시점에 한 번만 계산해서 클라이언트로 내려줄 가벼운 행 목록을 만든다.
+// 고객명/연락처/차대번호 같은 개인정보는 여기 담지 않는다 — 전체 6천여 건을 브라우저로
+// 보낼 이유가 없고(페이로드도 커짐), 검색은 /api/search 서버 라우트에서 처리한다.
+//
+// 필드명을 6천여 번 반복하지 않도록(JSON 페이로드 절감) 배열 형태로 내려보내고,
+// 클라이언트에서 unpackRows()로 다시 객체로 복원한다.
+export const CLIENT_ROW_FIELDS = [
+  "date",
+  "premium",
+  "insurer",
+  "joinType",
+  "channel",
+  "dealerKey",
+  "dealerName",
+  "managerName",
+  "group",
+];
 
-  const totals = {
-    count: clean.length,
-    premiumSum: sumPremium(clean),
-    dealerCount: new Set(clean.map(dealerKey)).size,
-    dateMin: clean.reduce(
-      (m, r) => (r.contractDate < m ? r.contractDate : m),
-      clean[0]?.contractDate ?? ""
-    ),
-    dateMax: clean.reduce(
-      (m, r) => (r.contractDate > m ? r.contractDate : m),
-      clean[0]?.contractDate ?? ""
-    ),
-  };
-  totals.avgPremium = totals.count
-    ? Math.round(totals.premiumSum / totals.count)
-    : 0;
+export function toClientRows(rawRows) {
+  return rawRows
+    .filter((r) => r.contractDate)
+    .map((r) => {
+      const dk = dealerKey(r);
+      return [
+        r.contractDate,
+        r.premium,
+        r.insurer || "미상",
+        r.joinType || "기타",
+        r.channel || "기타",
+        dk,
+        r.dealerName || "미상",
+        assignManager(dk),
+        assignGroup(dk).code,
+      ];
+    });
+}
 
-  const daily = bucketBy(clean, (r) => r.contractDate);
-  const weekly = bucketBy(
-    clean,
-    (r) => isoWeekInfo(r.contractDate).key,
-    (key, list) => isoWeekInfo(list[0].contractDate).label
-  );
-  const monthly = bucketBy(clean, (r) => monthOf(r.contractDate));
 
-  // 보험사 x 가입유형 피벗
-  const insurerSet = new Set();
-  const typeSet = new Set();
-  const pivotMap = new Map();
-  for (const r of clean) {
-    const insurer = r.insurer || "미상";
-    const type = r.joinType || "기타";
-    insurerSet.add(insurer);
-    typeSet.add(type);
-    const key = insurer + "|" + type;
-    pivotMap.set(key, (pivotMap.get(key) || 0) + (r.premium || 0));
-  }
-  const typeOrder = ["CM", "TM", "OFFLINE"];
-  const types = [...typeSet].sort(
-    (a, b) => typeOrder.indexOf(a) - typeOrder.indexOf(b)
-  );
-  const insurerPivot = [...insurerSet]
-    .map((insurer) => {
-      const byType = {};
-      let rowTotal = 0;
-      for (const t of types) {
-        const v = pivotMap.get(insurer + "|" + t) || 0;
-        byType[t] = v;
-        rowTotal += v;
-      }
-      return { insurer, byType, total: rowTotal };
-    })
-    .sort((a, b) => b.total - a.total);
-  const typeTotals = types.reduce((acc, t) => {
-    acc[t] = insurerPivot.reduce((s, row) => s + row.byType[t], 0);
-    return acc;
-  }, {});
-  const grandTotal = insurerPivot.reduce((s, row) => s + row.total, 0);
-
-  // 딜러별 실적 (매니저 컬럼이 없어 딜러 기준으로 대체)
-  const dealerMap = new Map();
-  for (const r of clean) {
-    const key = dealerKey(r);
-    if (!dealerMap.has(key)) dealerMap.set(key, []);
-    dealerMap.get(key).push(r);
-  }
-  const dealerRank = [...dealerMap.entries()]
-    .map(([, list]) => ({
-      dealerName: list[0].dealerName || "미상",
-      count: list.length,
-      premiumSum: sumPremium(list),
-    }))
-    .sort((a, b) => b.premiumSum - a.premiumSum);
-
-  // 영업채널별
-  const channelMap = new Map();
-  for (const r of clean) {
-    const key = r.channel || "기타";
-    if (!channelMap.has(key)) channelMap.set(key, []);
-    channelMap.get(key).push(r);
-  }
-  const byChannel = [...channelMap.entries()]
-    .map(([channel, list]) => ({
-      channel,
-      count: list.length,
-      premiumSum: sumPremium(list),
-    }))
-    .sort((a, b) => b.count - a.count);
-
-  // 주유권 발송 대상
-  const giftRows = clean.filter((r) => r.giftName);
-  const giftSummaryMap = new Map();
-  for (const r of giftRows) {
-    giftSummaryMap.set(r.giftName, (giftSummaryMap.get(r.giftName) || 0) + 1);
-  }
-  const giftSummary = [...giftSummaryMap.entries()]
-    .map(([giftName, count]) => ({ giftName, count }))
-    .sort((a, b) => b.count - a.count);
-  const giftList = giftRows
-    .map((r) => ({
-      customerName: r.customerName,
-      phone: r.phone,
-      giftName: r.giftName,
-      contractDate: r.contractDate,
-      dealerName: r.dealerName,
-    }))
-    .sort((a, b) => (a.contractDate < b.contractDate ? 1 : -1));
-
-  return {
-    totals,
-    periods: { daily, weekly, monthly },
-    insurerPivot: { rows: insurerPivot, types, typeTotals, grandTotal },
-    dealerRank,
-    byChannel,
-    gift: { summary: giftSummary, list: giftList },
-  };
+// 주유권 발송 리스트는 건수가 적어(수십 건) 필요한 필드를 그대로 내려도 부담이 없다.
+export function toGiftRows(rawRows) {
+  return rawRows
+    .filter((r) => r.contractDate && r.giftName)
+    .map((r) => {
+      const dk = dealerKey(r);
+      return {
+        date: r.contractDate,
+        customerName: r.customerName || "",
+        phone: r.phone || "",
+        giftName: r.giftName,
+        dealerName: r.dealerName || "미상",
+        managerName: assignManager(dk),
+      };
+    });
 }

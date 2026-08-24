@@ -21,6 +21,11 @@ export function formatCount(n) {
   return n.toLocaleString("ko-KR") + "건";
 }
 
+export function formatPercent(n, digits = 1) {
+  if (n == null || Number.isNaN(n)) return "-";
+  return n.toFixed(digits) + "%";
+}
+
 export function formatDateLabel(key) {
   // YYYY-MM-DD -> MM/DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(key)) {
