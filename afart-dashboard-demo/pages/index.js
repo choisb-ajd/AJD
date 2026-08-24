@@ -18,7 +18,6 @@ import {
 } from "../lib/format";
 import PeriodChart from "../components/PeriodChart";
 import FilterBar from "../components/FilterBar";
-import SearchPanel from "../components/SearchPanel";
 import TargetPanel from "../components/TargetPanel";
 import IncentivePanel from "../components/IncentivePanel";
 import MockBadge from "../components/MockBadge";
@@ -58,14 +57,19 @@ function monthsAgoStart(dateStr, n) {
   return `${yy}-${String(mm).padStart(2, "0")}-01`;
 }
 
-function addDays(dateStr, delta) {
+// dateStr과 같은 "일"을 바로 전달에서 찾아 돌려준다 (전달에 그 일자가 없으면 전달 말일로 캡).
+// 예: 2026-08-24 -> 2026-07-24, 2026-03-31 -> 2026-02-28
+function sameDayLastMonth(dateStr) {
   const d = new Date(dateStr + "T00:00:00Z");
-  d.setUTCDate(d.getUTCDate() + delta);
-  return d.toISOString().slice(0, 10);
-}
-
-function daysBetween(fromStr, toStr) {
-  return Math.round((new Date(toStr + "T00:00:00Z") - new Date(fromStr + "T00:00:00Z")) / 86400000) + 1;
+  const day = d.getUTCDate();
+  const prevMonthFirst = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1));
+  const prevMonthLastDay = new Date(
+    Date.UTC(prevMonthFirst.getUTCFullYear(), prevMonthFirst.getUTCMonth() + 1, 0)
+  ).getUTCDate();
+  const cappedDay = Math.min(day, prevMonthLastDay);
+  return `${prevMonthFirst.getUTCFullYear()}-${String(prevMonthFirst.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    cappedDay
+  ).padStart(2, "0")}`;
 }
 
 function diffPct(curr, prev) {
@@ -128,21 +132,29 @@ export default function Home({
   );
   const trendAgg = useMemo(() => aggregate(trendRows), [trendRows]);
 
-  // 직전 동기간(같은 길이의 바로 이전 구간) 대비 증감
-  const prevWindowTo = addDays(trendDateFrom, -1);
-  const prevWindowFrom = addDays(prevWindowTo, -(daysBetween(trendDateFrom, bounds.max) - 1));
-  const prevRows = useMemo(
-    () => filterRows(rows, { dateFrom: prevWindowFrom, dateTo: prevWindowTo, manager }),
-    [rows, prevWindowFrom, prevWindowTo, manager]
+  // 직전 동기간 = 바로 전달의 같은 날짜 범위(이번달 1일~오늘 대비 지난달 1일~같은 일자).
+  // 트렌드 탭(일/주/월)과 무관하게 항상 이번달 vs 지난달로 고정.
+  const curCompareFrom = oneMonthStart; // 이번달 1일
+  const curCompareTo = bounds.max; // 오늘
+  const prevCompareFrom = useMemo(() => monthsAgoStart(bounds.max, 2), [bounds.max]); // 지난달 1일
+  const prevCompareTo = useMemo(() => sameDayLastMonth(bounds.max), [bounds.max]); // 지난달 같은 일자
+
+  const curCompareRows = useMemo(
+    () => filterRows(rows, { dateFrom: curCompareFrom, dateTo: curCompareTo, manager }),
+    [rows, curCompareFrom, curCompareTo, manager]
   );
-  const prevAgg = useMemo(() => aggregate(prevRows), [prevRows]);
+  const prevCompareRows = useMemo(
+    () => filterRows(rows, { dateFrom: prevCompareFrom, dateTo: prevCompareTo, manager }),
+    [rows, prevCompareFrom, prevCompareTo, manager]
+  );
+  const curCompareAgg = useMemo(() => aggregate(curCompareRows), [curCompareRows]);
+  const prevCompareAgg = useMemo(() => aggregate(prevCompareRows), [prevCompareRows]);
   const periodComparison = {
-    prevFrom: prevWindowFrom,
-    prevTo: prevWindowTo,
-    premiumPct: diffPct(trendAgg.totals.premiumSum, prevAgg.totals.premiumSum),
-    countPct: diffPct(trendAgg.totals.count, prevAgg.totals.count),
-    // 데이터가 2026-01-02부터 시작이라, 6개월 윈도우의 "직전 6개월"은 실제 데이터가 일부만 있다.
-    incomplete: prevWindowFrom < bounds.min,
+    prevFrom: prevCompareFrom,
+    prevTo: prevCompareTo,
+    premiumPct: diffPct(curCompareAgg.totals.premiumSum, prevCompareAgg.totals.premiumSum),
+    countPct: diffPct(curCompareAgg.totals.count, prevCompareAgg.totals.count),
+    incomplete: prevCompareFrom < bounds.min,
   };
 
   const periodRows = useMemo(() => {
@@ -300,7 +312,8 @@ export default function Home({
           </p>
           <div className="compare-row">
             <span className="compare-label">
-              직전 동기간({periodComparison.prevFrom} ~ {periodComparison.prevTo}) 대비
+              직전 동기간(지난달, {periodComparison.prevFrom} ~ {periodComparison.prevTo}) 대비 — 이번달 {curCompareFrom} ~{" "}
+              {curCompareTo} 기준
             </span>
             <span className={`compare-value ${periodComparison.premiumPct != null && periodComparison.premiumPct < 0 ? "down" : "up"}`}>
               원수보험료 {deltaLabel(periodComparison.premiumPct)}
@@ -310,7 +323,7 @@ export default function Home({
             </span>
             {periodComparison.incomplete && (
               <span style={{ color: "var(--ink-faint)" }}>
-                ⚠ 데이터가 {bounds.min}부터 시작이라 직전 구간 일부는 실적이 비어 있어 증감률이 부풀려져 보일 수 있습니다
+                ⚠ 데이터가 {bounds.min}부터 시작이라 지난달 실적이 비어 있어 증감률을 비교할 수 없습니다
               </span>
             )}
           </div>
@@ -736,22 +749,12 @@ export default function Home({
           </div>
         </section>
 
-        <section className="section">
-          <div className="section-head">
-            <h2>상세검색 — 고객 검색</h2>
-          </div>
-          <p className="section-note">
-            주민번호+이름 / 핸드폰번호+이름 / 차량번호·차대번호로 고객을 찾는 검색 기능 데모입니다. 필터와 무관하게 전체 raw 데이터에서 검색합니다.
-          </p>
-          <SearchPanel />
-        </section>
-
         <div className="scope-out">
           <h3>실제 서비스 전환 시 필요한 것</h3>
           <ul>
             <li><MockBadge /> 표시가 붙은 섹션(앱가입현황, 하루 갱신 건, 인센티브 요율)은 실제 데이터 소스가 생기기 전까지 샘플입니다</li>
             <li>매니저별 목표매출은 전사 목표(10억)만 반영했고, 개별 목표는 입력 UI만 만들어뒀습니다 — 값 저장은 브라우저 로컬에만 됩니다</li>
-            <li>주민번호 검색은 이 raw 데이터에 원천적으로 없어, 실제 서비스에서도 암호화된 customer_rrn 처리 방식을 먼저 정해야 함</li>
+            <li>상세검색(주민번호/핸드폰/차량번호)은 이 데모 범위에서 빼고 별도로 개발 요청 예정입니다</li>
             <li>자세한 데이터 매핑·조인 기준은 별도 공유된 배치도 문서를 참고</li>
           </ul>
         </div>
