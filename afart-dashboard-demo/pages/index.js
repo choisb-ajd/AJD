@@ -122,6 +122,8 @@ export default function Home({
   );
 
   const renewalsInRange = RENEWAL_TODAY_SAMPLE.filter((r) => r.dueDate >= dateFrom && r.dueDate <= dateTo);
+  const pendingShown = pending.slice(0, 30);
+  const topManagerPremium = aggAll.managerRank[0]?.premiumSum || 1;
 
   return (
     <>
@@ -276,17 +278,30 @@ export default function Home({
             counsel_manager 기준 실제 데이터입니다. 선택한 기간의 전체 매니저를 비교하며, 필터에서 매니저를 고르면 해당 행이 강조됩니다.
           </p>
           <div className="card">
-            {aggAll.managerRank.map((m, i) => (
-              <div key={m.managerName} className={`rank-row ${m.managerName === manager ? "selected" : ""}`}>
-                <span className={`rank-badge ${i < 3 ? "top" : ""}`}>{i + 1}</span>
-                <span className="name">{m.managerName}</span>
-                <span className="num">담당딜러 {m.dealerCount}</span>
-                <span className="num">{formatCount(m.count)}</span>
-                <span className="num" style={{ fontWeight: 700, color: "var(--accent-ink)" }}>
-                  {formatWon(m.premiumSum)}
-                </span>
-              </div>
-            ))}
+            {aggAll.managerRank.map((m, i) => {
+              const pct = Math.max(6, (m.premiumSum / topManagerPremium) * 100);
+              const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : null;
+              return (
+                <div key={m.managerName} className={`rank-row ${m.managerName === manager ? "selected" : ""}`}>
+                  <span className={`rank-badge ${i < 3 ? "top" : ""}`}>{medal || i + 1}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                      <span className="name">{m.managerName}</span>
+                      <span style={{ fontSize: 12, color: "var(--ink-muted)" }}>
+                        담당딜러 {m.dealerCount} · {formatCount(m.count)} ·{" "}
+                        <b style={{ color: "var(--accent-ink)", fontSize: 13 }}>{formatWon(m.premiumSum)}</b>
+                      </span>
+                    </div>
+                    <div className="race-track">
+                      <div className="race-fill" style={{ width: `${pct}%` }} />
+                      <span className="race-runner" style={{ left: `${pct}%` }}>
+                        🏃💨
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </section>
 
@@ -427,6 +442,7 @@ export default function Home({
                   <thead>
                     <tr>
                       <th>딜러</th>
+                      <th>담당 매니저</th>
                       <th>체결건수</th>
                       <th>원수보험료</th>
                     </tr>
@@ -438,6 +454,7 @@ export default function Home({
                           <span className={`rank-badge ${i < 3 ? "top" : ""}`}>{i + 1}</span>
                           {d.dealerName}
                         </td>
+                        <td>{d.managerName}</td>
                         <td>{formatCount(d.count)}</td>
                         <td>{formatWon(d.premiumSum)}</td>
                       </tr>
@@ -447,6 +464,7 @@ export default function Home({
                     <tfoot>
                       <tr>
                         <td>그 외 {dealerRest}명</td>
+                        <td>-</td>
                         <td>{formatCount(dealerRestCount)}</td>
                         <td>{formatWon(dealerRestSum)}</td>
                       </tr>
@@ -527,8 +545,11 @@ export default function Home({
             <div className="section-head">
               <h2>'지급대기' 전환 고객 리스트</h2>
             </div>
-            <p className="section-note">현재상태 = ACCUMULATE_PENDING 실제 데이터입니다.</p>
-            <div className="table-wrap">
+            <p className="section-note">
+              현재상태 = ACCUMULATE_PENDING 실제 데이터입니다.
+              {pending.length > 30 && ` 최근 30건만 표시하고 스크롤됩니다 (전체 ${formatCount(pending.length)}).`}
+            </p>
+            <div className="table-wrap table-scroll">
               <table className="data">
                 <thead>
                   <tr>
@@ -540,14 +561,14 @@ export default function Home({
                   </tr>
                 </thead>
                 <tbody>
-                  {pending.length === 0 && (
+                  {pendingShown.length === 0 && (
                     <tr>
                       <td colSpan={5} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
                         해당 조건에 지급대기 건이 없습니다.
                       </td>
                     </tr>
                   )}
-                  {pending.map((r, i) => (
+                  {pendingShown.map((r, i) => (
                     <tr key={i}>
                       <td>{r.transitionAt}</td>
                       <td style={{ textAlign: "left" }}>{r.customerName}</td>
