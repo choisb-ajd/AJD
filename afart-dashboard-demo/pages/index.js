@@ -208,12 +208,6 @@ export default function Home({
         </div>
         <nav>
           <a className="active">실적 대시보드</a>
-          <a>회원별 고객 관리</a>
-          <a>회원 관리</a>
-          <a>출금 관리</a>
-          <a>고객 상담</a>
-          <a>비교 견적</a>
-          <a>설정</a>
         </nav>
       </div>
 
