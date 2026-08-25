@@ -621,6 +621,17 @@ table.data input[type="date"] {
   z-index: 1;
 }
 
+/* 10건 넘는 짧은 리스트용 (하루 갱신 건 등) — 대략 10행 높이에서 스크롤 시작 */
+.table-scroll-sm {
+  max-height: 420px;
+  overflow-y: auto;
+}
+.table-scroll-sm thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
 @media (max-width: 900px) {
   .search-grid {
     grid-template-columns: 1fr;

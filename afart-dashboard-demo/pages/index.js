@@ -600,7 +600,7 @@ export default function Home({
             <h2>하루 갱신 건 집계</h2>
             <MockBadge />
           </div>
-          <div className="table-wrap">
+          <div className={`table-wrap ${renewalsInRange.length > 10 ? "table-scroll-sm" : ""}`}>
             <table className="data">
               <thead>
                 <tr>
