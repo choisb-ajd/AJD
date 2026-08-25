@@ -1,42 +1,12 @@
-import { useEffect, useState } from "react";
+import { useTarget } from "../lib/useTarget";
 import { formatCompactWon, formatPercent } from "../lib/format";
 
-const STORAGE_KEY = "afart-demo-targets-v1";
-
-function loadTargets() {
-  if (typeof window === "undefined") return {};
-  try {
-    return JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "{}");
-  } catch {
-    return {};
-  }
-}
-
-function saveTargets(obj) {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
-  } catch {
-    // 저장 실패해도 화면 동작에는 지장 없음 (프라이빗 브라우징 등)
-  }
-}
-
 export default function TargetPanel({ scopeKey, rangeKey, premiumSum, defaultTarget = 0 }) {
-  const [targets, setTargets] = useState({});
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    setTargets(loadTargets());
-    setLoaded(true);
-  }, []);
-
-  const storeKey = `${scopeKey}|${rangeKey}`;
-  const target = targets[storeKey] ?? defaultTarget;
+  const { target, setTarget, loaded } = useTarget(`${scopeKey}|${rangeKey}`, defaultTarget);
 
   const handleChange = (val) => {
     const num = Number(val.replace(/[^0-9]/g, "")) || 0;
-    const next = { ...targets, [storeKey]: num };
-    setTargets(next);
-    saveTargets(next);
+    setTarget(num);
   };
 
   const rate = target > 0 ? (premiumSum / target) * 100 : 0;
