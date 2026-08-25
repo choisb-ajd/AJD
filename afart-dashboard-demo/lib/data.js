@@ -193,3 +193,28 @@ export function toCancelledHistoryRows(rawRows) {
       };
     });
 }
+
+// 매출 로우 데이터 리스트(/api/sales)용 — 기간으로 걸러 필요한 컬럼만 내려준다.
+// 만기일자는 이 raw pull에 없는 필드라 항상 빈 값으로 내려가고, 화면에서 "-"로 표시한다.
+// 딜러 전담 매니저 컬럼도 이 raw pull엔 상담(체결)매니저와 같은 매니저이름 컬럼 하나뿐이라 동일한 값이 들어간다.
+export function toSalesRows(rawRows, { dateFrom, dateTo }) {
+  return rawRows
+    .filter((r) => {
+      if (!r.contractDate || !isEligibleDealer(r)) return false;
+      if (dateFrom && r.contractDate < dateFrom) return false;
+      if (dateTo && r.contractDate > dateTo) return false;
+      return true;
+    })
+    .map((r) => ({
+      channel: r.channel || "기타",
+      customerName: r.customerName || "",
+      vin: r.vin || "",
+      expiryDate: "",
+      premium: r.premium,
+      contractDate: r.contractDate,
+      counselManagerName: r.managerName || "미배정",
+      dealerName: r.dealerName || "미상",
+      dealerManagerName: r.managerName || "미배정",
+    }))
+    .sort((a, b) => (a.contractDate < b.contractDate ? 1 : -1));
+}

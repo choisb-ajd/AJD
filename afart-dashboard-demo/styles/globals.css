@@ -392,7 +392,8 @@ footer.foot {
 }
 .filter-field input[type="date"],
 .filter-field select,
-.filter-field input[type="text"] {
+.filter-field input[type="text"],
+.date-input {
   font-family: inherit;
   font-size: 13px;
   padding: 7px 10px;

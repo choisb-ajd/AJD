@@ -10,7 +10,7 @@ import {
 } from "recharts";
 import { formatCompactWon, formatCount } from "../lib/format";
 
-function ChartTooltip({ active, payload, label }) {
+function ChartTooltip({ active, payload, label, single, valueLabel, valueFormatter }) {
   if (!active || !payload || !payload.length) return null;
   const p = payload[0]?.payload;
   return (
@@ -25,15 +25,24 @@ function ChartTooltip({ active, payload, label }) {
       }}
     >
       <div style={{ fontWeight: 600, marginBottom: 4 }}>{label}</div>
-      <div>원수보험료 · {formatCompactWon(p.premiumSum)}</div>
-      <div style={{ color: "var(--ink-muted)" }}>
-        체결건수 · {formatCount(p.count)}
-      </div>
+      {single ? (
+        <div>
+          {valueLabel} · {valueFormatter(p.premiumSum)}
+        </div>
+      ) : (
+        <>
+          <div>원수보험료 · {formatCompactWon(p.premiumSum)}</div>
+          <div style={{ color: "var(--ink-muted)" }}>체결건수 · {formatCount(p.count)}</div>
+        </>
+      )}
     </div>
   );
 }
 
-export default function PeriodChart({ data }) {
+// mode="premium"(기본) — 막대(원수보험료)+선(체결건수), 툴팁에 둘 다 표시.
+// mode="count" — 막대 하나만, 툴팁에도 valueLabel 한 줄만 표시 (예: 앱 가입현황).
+export default function PeriodChart({ data, mode = "premium", valueLabel = "건수", valueFormatter = formatCount }) {
+  const single = mode === "count";
   return (
     <div style={{ width: "100%", height: 220 }}>
       <ResponsiveContainer>
@@ -47,29 +56,21 @@ export default function PeriodChart({ data }) {
           />
           <YAxis
             yAxisId="premium"
-            tickFormatter={(v) => formatCompactWon(v)}
+            tickFormatter={single ? (v) => formatCount(v) : (v) => formatCompactWon(v)}
             tick={{ fontSize: 10, fill: "var(--ink-faint)" }}
             axisLine={false}
             tickLine={false}
             width={64}
           />
-          <YAxis yAxisId="count" orientation="right" hide />
-          <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(36,82,217,0.06)" }} />
-          <Bar
-            yAxisId="premium"
-            dataKey="premiumSum"
-            fill="var(--accent)"
-            radius={[3, 3, 0, 0]}
-            maxBarSize={28}
+          {!single && <YAxis yAxisId="count" orientation="right" hide />}
+          <Tooltip
+            content={<ChartTooltip single={single} valueLabel={valueLabel} valueFormatter={valueFormatter} />}
+            cursor={{ fill: "rgba(36,82,217,0.06)" }}
           />
-          <Line
-            yAxisId="count"
-            type="monotone"
-            dataKey="count"
-            stroke="var(--warn)"
-            strokeWidth={2}
-            dot={false}
-          />
+          <Bar yAxisId="premium" dataKey="premiumSum" fill="var(--accent)" radius={[3, 3, 0, 0]} maxBarSize={28} />
+          {!single && (
+            <Line yAxisId="count" type="monotone" dataKey="count" stroke="var(--warn)" strokeWidth={2} dot={false} />
+          )}
         </ComposedChart>
       </ResponsiveContainer>
     </div>
