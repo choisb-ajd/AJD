@@ -21,6 +21,7 @@ import FilterBar from "../components/FilterBar";
 import TargetPanel from "../components/TargetPanel";
 import IncentivePanel from "../components/IncentivePanel";
 import MockBadge from "../components/MockBadge";
+import SalesRawList from "../components/SalesRawList";
 import { GROUPS } from "../lib/groups";
 import { generateAppSignups, RENEWAL_TODAY_SAMPLE } from "../lib/mockData";
 
@@ -283,6 +284,8 @@ export default function Home({
               선택 기간 신규가입 <b style={{ color: "var(--ink)" }}>{formatCount(appSignupTotal)}</b>
             </div>
             <PeriodChart
+              mode="count"
+              valueLabel="앱 가입 건수"
               data={appSignups.map((d) => ({
                 label: formatDateLabel(d.date),
                 premiumSum: d.count,
@@ -448,31 +451,6 @@ export default function Home({
 
         <section className="section">
           <div className="section-head">
-            <h2>딜러유형별 배정 회원수{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
-          </div>
-          <p className="section-note">business_type 실제 데이터입니다. 신차딜러는 business_sub_type이 없어 수입/국산으로 나누지 못합니다.</p>
-          <div className="table-wrap">
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>딜러유형</th>
-                  <th>배정 회원수</th>
-                </tr>
-              </thead>
-              <tbody>
-                {groupRows.map((g) => (
-                  <tr key={g.code}>
-                    <td>{g.label}</td>
-                    <td>{g.dealerCount.toLocaleString("ko-KR")}명</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="section">
-          <div className="section-head">
             <h2>가입 보험사 × 가입유형(CM/TM)별 원수보험료{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
           </div>
           <div className="table-wrap">
@@ -580,6 +558,31 @@ export default function Home({
                         <td>{c.channel}</td>
                         <td>{formatCount(c.count)}</td>
                         <td>{formatWon(c.premiumSum)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="section-head" style={{ marginTop: 24 }}>
+                <h2>딜러유형별 배정 회원수{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
+              </div>
+              <p className="section-note">
+                business_type 실제 데이터입니다. 신차딜러는 business_sub_type이 없어 수입/국산으로 나누지 못합니다.
+              </p>
+              <div className="table-wrap">
+                <table className="data">
+                  <thead>
+                    <tr>
+                      <th>딜러유형</th>
+                      <th>배정 회원수</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {groupRows.map((g) => (
+                      <tr key={g.code}>
+                        <td>{g.label}</td>
+                        <td>{g.dealerCount.toLocaleString("ko-KR")}명</td>
                       </tr>
                     ))}
                   </tbody>
@@ -753,6 +756,18 @@ export default function Home({
               </tbody>
             </table>
           </div>
+        </section>
+
+        <section className="section">
+          <div className="section-head">
+            <h2>매출 로우 데이터</h2>
+          </div>
+          <p className="section-note">
+            기간을 지정해서 원본에 가까운 건별 데이터를 확인합니다. 만기일자는 이 raw pull에 없는 필드라 "-"로 표시되고, 딜러 전담
+            매니저도 이 raw pull엔 상담(체결)매니저와 같은 매니저이름 컬럼 하나뿐이라 두 컬럼이 같은 값으로 나옵니다 — 실제 서비스는
+            users.manager_id로 구분됩니다.
+          </p>
+          <SalesRawList initialFrom={dateFrom} initialTo={dateTo} bounds={bounds} />
         </section>
 
         <div className="scope-out">
