@@ -77,19 +77,22 @@ export default function SalesRawList({ initialFrom, initialTo, bounds }) {
                 </td>
               </tr>
             )}
-            {rows.map((r, i) => (
-              <tr key={i}>
-                <td>{r.channel}</td>
-                <td style={{ textAlign: "left" }}>{r.customerName}</td>
-                <td>{r.vin || "-"}</td>
-                <td>{r.expiryDate || "-"}</td>
-                <td>{formatWon(r.premium)}</td>
-                <td>{r.contractDate}</td>
-                <td>{r.counselManagerName}</td>
-                <td>{r.dealerName}</td>
-                <td>{r.dealerManagerName}</td>
-              </tr>
-            ))}
+            {rows.map((r, i) => {
+              const mismatch = r.counselManagerName !== r.dealerManagerName;
+              return (
+                <tr key={i}>
+                  <td>{r.channel}</td>
+                  <td style={{ textAlign: "left" }}>{r.customerName}</td>
+                  <td>{r.vin || "-"}</td>
+                  <td>{r.expiryDate || "-"}</td>
+                  <td>{formatWon(r.premium)}</td>
+                  <td>{r.contractDate}</td>
+                  <td className={mismatch ? "manager-mismatch" : ""}>{r.counselManagerName}</td>
+                  <td>{r.dealerName}</td>
+                  <td className={mismatch ? "manager-mismatch" : ""}>{r.dealerManagerName}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

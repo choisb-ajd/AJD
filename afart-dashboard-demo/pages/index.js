@@ -365,9 +365,10 @@ export default function Home({
             <h2>매출 로우 데이터</h2>
           </div>
           <p className="section-note">
-            기간을 지정해서 원본에 가까운 건별 데이터를 확인합니다. 만기일자는 이 raw pull에 없는 필드라 "-"로 표시되고, 딜러 전담
-            매니저도 이 raw pull엔 상담(체결)매니저와 같은 매니저이름 컬럼 하나뿐이라 두 컬럼이 같은 값으로 나옵니다 — 실제 서비스는
-            users.manager_id로 구분됩니다.
+            기간을 지정해서 원본에 가까운 건별 데이터를 확인합니다. 만기일자는 이 raw pull에 없는 필드라 "-"로 표시됩니다.
+            상담(체결)매니저와 딜러 전담 매니저가 <span style={{ color: "var(--warn)", fontWeight: 600 }}>다른 행은 연한 주황</span>으로
+            표시됩니다 — 다만 이 raw pull엔 매니저이름 컬럼이 하나뿐이라 두 값이 항상 같게 채워져 있어, 지금은 실제로 주황 표시가
+            나타나지 않습니다. 실제 서비스에서 users.manager_id(딜러 담당)와 counsel_manager_id(상담 담당)를 따로 조인하면 동작합니다.
           </p>
           <SalesRawList initialFrom={dateFrom} initialTo={dateTo} bounds={bounds} />
         </section>
