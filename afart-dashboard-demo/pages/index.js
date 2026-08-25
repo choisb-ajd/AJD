@@ -336,7 +336,7 @@ export default function Home({
               }))}
             />
           </div>
-          <div className="table-wrap table-scroll" style={{ marginTop: 12 }}>
+          <div className="table-wrap table-scroll-6" style={{ marginTop: 12 }}>
             <table className="data">
               <thead>
                 <tr>
@@ -358,6 +358,18 @@ export default function Home({
               </tbody>
             </table>
           </div>
+        </section>
+
+        <section className="section">
+          <div className="section-head">
+            <h2>매출 로우 데이터</h2>
+          </div>
+          <p className="section-note">
+            기간을 지정해서 원본에 가까운 건별 데이터를 확인합니다. 만기일자는 이 raw pull에 없는 필드라 "-"로 표시되고, 딜러 전담
+            매니저도 이 raw pull엔 상담(체결)매니저와 같은 매니저이름 컬럼 하나뿐이라 두 컬럼이 같은 값으로 나옵니다 — 실제 서비스는
+            users.manager_id로 구분됩니다.
+          </p>
+          <SalesRawList initialFrom={dateFrom} initialTo={dateTo} bounds={bounds} />
         </section>
 
         <section className="section">
@@ -507,6 +519,7 @@ export default function Home({
                   <thead>
                     <tr>
                       <th>딜러</th>
+                      <th>딜러유형</th>
                       <th>담당 매니저</th>
                       <th>체결건수</th>
                       <th>원수보험료</th>
@@ -519,6 +532,7 @@ export default function Home({
                           <span className={`rank-badge ${i < 3 ? "top" : ""}`}>{i + 1}</span>
                           {d.dealerName}
                         </td>
+                        <td>{GROUPS.find((g) => g.code === d.group)?.label ?? "-"}</td>
                         <td>{d.managerName}</td>
                         <td>{formatCount(d.count)}</td>
                         <td>{formatWon(d.premiumSum)}</td>
@@ -529,6 +543,7 @@ export default function Home({
                     <tfoot>
                       <tr>
                         <td>그 외 {dealerRest}명</td>
+                        <td>-</td>
                         <td>-</td>
                         <td>{formatCount(dealerRestCount)}</td>
                         <td>{formatWon(dealerRestSum)}</td>
@@ -756,18 +771,6 @@ export default function Home({
               </tbody>
             </table>
           </div>
-        </section>
-
-        <section className="section">
-          <div className="section-head">
-            <h2>매출 로우 데이터</h2>
-          </div>
-          <p className="section-note">
-            기간을 지정해서 원본에 가까운 건별 데이터를 확인합니다. 만기일자는 이 raw pull에 없는 필드라 "-"로 표시되고, 딜러 전담
-            매니저도 이 raw pull엔 상담(체결)매니저와 같은 매니저이름 컬럼 하나뿐이라 두 컬럼이 같은 값으로 나옵니다 — 실제 서비스는
-            users.manager_id로 구분됩니다.
-          </p>
-          <SalesRawList initialFrom={dateFrom} initialTo={dateTo} bounds={bounds} />
         </section>
 
         <div className="scope-out">

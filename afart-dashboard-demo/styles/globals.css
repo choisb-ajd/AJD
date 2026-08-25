@@ -633,6 +633,17 @@ table.data input[type="date"] {
   z-index: 1;
 }
 
+/* 기간별 실적 표 — 일/주/월 어느 탭이든 항상 6행 높이로 고정, 그 이상은 스크롤 */
+.table-scroll-6 {
+  max-height: 258px;
+  overflow-y: auto;
+}
+.table-scroll-6 thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
 @media (max-width: 900px) {
   .search-grid {
     grid-template-columns: 1fr;
