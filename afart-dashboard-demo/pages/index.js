@@ -358,7 +358,7 @@ export default function Home({
 
         <section className="section">
           <div className="section-head">
-            <h2>매출 로우 데이터</h2>
+            <h2>매출 리스트</h2>
           </div>
           <p className="section-note">
             기간을 지정해서 원본에 가까운 건별 데이터를 확인합니다. 만기일자는 이 raw pull에 없는 필드라 "-"로 표시됩니다.
