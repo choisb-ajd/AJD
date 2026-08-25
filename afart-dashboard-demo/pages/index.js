@@ -417,6 +417,18 @@ export default function Home({
 
         <section className="section">
           <div className="section-head">
+            <h2>선택 기간 목표매출 달성률</h2>
+          </div>
+          <TargetPanel
+            scopeKey={manager}
+            rangeKey={`${dateFrom}~${dateTo}`}
+            premiumSum={agg.totals.premiumSum}
+            defaultTarget={manager === "ALL" ? COMPANY_MONTHLY_TARGET : 0}
+          />
+        </section>
+
+        <section className="section">
+          <div className="section-head">
             <h2>비견(비교견적완료) 퍼널{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
           </div>
           <p className="section-note">
@@ -446,18 +458,6 @@ export default function Home({
               </div>
             </div>
           </div>
-        </section>
-
-        <section className="section">
-          <div className="section-head">
-            <h2>선택 기간 목표매출 달성률</h2>
-          </div>
-          <TargetPanel
-            scopeKey={manager}
-            rangeKey={`${dateFrom}~${dateTo}`}
-            premiumSum={agg.totals.premiumSum}
-            defaultTarget={manager === "ALL" ? COMPANY_MONTHLY_TARGET : 0}
-          />
         </section>
 
         <section className="section">
