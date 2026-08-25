@@ -145,6 +145,7 @@ _CONTRACT_CTE = """
                CV.COUNSEL_VEHICLE_ID,
                CV.CONTRACT_AMOUNT,
                CV.REGISTRATION_TYPE,
+               CV.EXIST_INSURER_CODE,
                CASE WHEN LG.PENDING_AT IS NOT NULL
                     THEN LG.PENDING_AT
                     ELSE CA.JOIN_COMPLETED_AT
@@ -280,9 +281,19 @@ with tab1:
             {_CONTRACT_CTE}
             SELECT
                 SUM(CASE WHEN DATE_TRUNC('MONTH', ct.CONTRACT_AT) = DATE_TRUNC('MONTH', CURRENT_DATE)
+                              AND (ct.EXIST_INSURER_CODE IS NULL OR ct.EXIST_INSURER_CODE != ct.JOIN_INSURER_CODE)
                          THEN ct.CONTRACT_AMOUNT ELSE 0 END) AS cur_month,
                 SUM(CASE WHEN ct.CONTRACT_AT::DATE BETWEEN '{lms}' AND '{spe}'
-                         THEN ct.CONTRACT_AMOUNT ELSE 0 END) AS last_same
+                              AND (ct.EXIST_INSURER_CODE IS NULL OR ct.EXIST_INSURER_CODE != ct.JOIN_INSURER_CODE)
+                         THEN ct.CONTRACT_AMOUNT ELSE 0 END) AS last_same,
+                SUM(CASE WHEN DATE_TRUNC('MONTH', ct.CONTRACT_AT) = DATE_TRUNC('MONTH', CURRENT_DATE)
+                              AND ct.EXIST_INSURER_CODE IS NOT NULL
+                              AND ct.EXIST_INSURER_CODE != ct.JOIN_INSURER_CODE
+                         THEN ct.CONTRACT_AMOUNT ELSE 0 END) AS switch_amount,
+                SUM(CASE WHEN DATE_TRUNC('MONTH', ct.CONTRACT_AT) = DATE_TRUNC('MONTH', CURRENT_DATE)
+                              AND ct.EXIST_INSURER_CODE IS NOT NULL
+                              AND ct.EXIST_INSURER_CODE != ct.JOIN_INSURER_CODE
+                         THEN 1 ELSE 0 END) AS switch_count
             FROM CONTRACT ct
         """).collect()
         return r[0]
@@ -323,6 +334,8 @@ with tab1:
     cur  = kpi_prem["CUR_MONTH"] or 0
     lst  = kpi_prem["LAST_SAME"] or 0
     diff = cur - lst
+    switch_amt = int(kpi_prem["SWITCH_AMOUNT"] or 0)
+    switch_cnt = int(kpi_prem["SWITCH_COUNT"] or 0)
 
     if lst > 0:
         pct        = diff / lst * 100
@@ -334,13 +347,16 @@ with tab1:
         diff_str   = ""
         delta_type = "neutral"
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c0 = st.columns(4)
     with c1:
         st.markdown(kpi_card_two_delta("당월 총 원수보험료", f"{int(cur):,}원",
                                        pct_str, diff_str, delta_type, small=True), unsafe_allow_html=True)
     with c2:
-        st.markdown(kpi_card("당월 앱 가입자수", f"{kpi_usr['THIS_MONTH']:,}명"), unsafe_allow_html=True)
+        st.markdown(kpi_card("기존→신규 전환", f"{switch_amt:,}원",
+                             f"{switch_cnt:,}건", "neutral"), unsafe_allow_html=True)
     with c3:
+        st.markdown(kpi_card("당월 앱 가입자수", f"{kpi_usr['THIS_MONTH']:,}명"), unsafe_allow_html=True)
+    with c0:
         st.markdown(kpi_card("누적 앱 가입자수", f"{kpi_usr['TOTAL']:,}명"), unsafe_allow_html=True)
 
     c4, c5, c6 = st.columns(3)
