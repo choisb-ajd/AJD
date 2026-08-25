@@ -256,6 +256,11 @@ table.data tbody td {
 table.data tbody tr:last-child td {
   border-bottom: none;
 }
+table.data tbody td.manager-mismatch {
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-weight: 600;
+}
 table.data tbody tr:nth-child(even) {
   background: rgba(28, 33, 41, 0.015);
 }
