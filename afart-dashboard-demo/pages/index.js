@@ -23,7 +23,7 @@ import IncentivePanel from "../components/IncentivePanel";
 import MockBadge from "../components/MockBadge";
 import SalesRawList from "../components/SalesRawList";
 import { GROUPS } from "../lib/groups";
-import { generateAppSignups, RENEWAL_TODAY_SAMPLE } from "../lib/mockData";
+import { generateAppSignups, RENEWAL_SAMPLE, daysUntil, shortDateToFull } from "../lib/mockData";
 
 const COMPANY_MONTHLY_TARGET = 1_000_000_000; // 원수보험료 기준 월 목표 10억원 (직접 전달받은 값)
 
@@ -108,6 +108,7 @@ export default function Home({
   const [period, setPeriod] = useState("monthly");
   const [dealerSort, setDealerSort] = useState("premiumSum");
   const [giftShipDate, setGiftShipDate] = useState("");
+  const [renewalDaysAhead, setRenewalDaysAhead] = useState(45);
 
   const resetFilters = () => {
     setDateFrom(defaultDateFrom);
@@ -185,7 +186,10 @@ export default function Home({
     [cancelledRows, dateFrom, dateTo, manager]
   );
 
-  const renewalsInRange = RENEWAL_TODAY_SAMPLE.filter((r) => r.dueDate >= dateFrom && r.dueDate <= dateTo);
+  // 갱신 관리 — 오늘(bounds.max) 기준으로 만기가 renewalDaysAhead일 이내로 도래한 건만, 가까운 순으로.
+  const renewalUpcoming = RENEWAL_SAMPLE.map((r) => ({ ...r, daysLeft: daysUntil(r.dueDate, bounds.max) }))
+    .filter((r) => r.daysLeft <= renewalDaysAhead)
+    .sort((a, b) => a.daysLeft - b.daysLeft);
   const pendingShown = pending.slice(0, 30);
   const topManagerPremium = aggAll.managerRank[0]?.premiumSum || 1;
 
@@ -221,7 +225,7 @@ export default function Home({
         만든 프로토타입입니다. 매니저·딜러유형·상태이력·지급대기/가입취소는 실제 데이터를 그대로 씁니다. <MockBadge /> 표시가 붙은
         영역만 이 raw 데이터에 없는 값이라 시연을 위해 만든 샘플입니다.
         <ul>
-          <li>앱가입현황, 하루 갱신 건, 인센티브 요율은 이 raw pull에 아예 없는 값이라 샘플로 대체했습니다.</li>
+          <li>앱가입현황, 갱신 관리, 인센티브 요율은 이 raw pull에 아예 없는 값이라 샘플로 대체했습니다.</li>
           <li>신차딜러는 business_sub_type(수입/국산)이 없어 하나로 묶었습니다 — 원래 배치도의 G1/G2 세분화는 불가합니다.</li>
           <li>비견 퍼널의 "전환율"은 이 raw pull이 이미 성사된 건만 담고 있어, 손실 건을 포함한 진짜 전환율이 아니라 "체결 건 중 비교견적을 거친 비율"입니다.</li>
         </ul>
@@ -602,10 +606,23 @@ export default function Home({
 
         <section className="section">
           <div className="section-head">
-            <h2>하루 갱신 건 집계</h2>
+            <h2>갱신 관리</h2>
             <MockBadge />
           </div>
-          <div className={`table-wrap ${renewalsInRange.length > 10 ? "table-scroll-sm" : ""}`}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, fontSize: 13 }}>
+            <span style={{ color: "var(--ink-muted)" }}>만기 도래</span>
+            <input
+              type="number"
+              min={0}
+              className="date-input"
+              style={{ width: 70, textAlign: "right" }}
+              value={renewalDaysAhead}
+              onChange={(e) => setRenewalDaysAhead(Math.max(0, Number(e.target.value) || 0))}
+            />
+            <span style={{ color: "var(--ink-muted)" }}>일 전부터 표시 (오늘 = {bounds.max} 기준, 기본값 45일)</span>
+          </div>
+          <p className="section-note">만기일이 가까운 순으로 정렬됩니다. 이미 만기가 지난 건은 맨 위에 표시됩니다.</p>
+          <div className={`table-wrap ${renewalUpcoming.length > 10 ? "table-scroll-sm" : ""}`}>
             <table className="data">
               <thead>
                 <tr>
@@ -614,23 +631,25 @@ export default function Home({
                   <th>연락처</th>
                   <th>기존 보험사</th>
                   <th>담당 딜러</th>
+                  <th>체결 매니저</th>
                 </tr>
               </thead>
               <tbody>
-                {renewalsInRange.length === 0 && (
+                {renewalUpcoming.length === 0 && (
                   <tr>
-                    <td colSpan={5} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
-                      선택한 기간엔 갱신 예정 건이 없습니다.
+                    <td colSpan={6} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                      해당 조건에 갱신 예정 건이 없습니다.
                     </td>
                   </tr>
                 )}
-                {renewalsInRange.map((r, i) => (
+                {renewalUpcoming.map((r, i) => (
                   <tr key={i}>
-                    <td>{r.dueDate}</td>
+                    <td>{shortDateToFull(r.dueDate)}</td>
                     <td style={{ textAlign: "left" }}>{r.customerName}</td>
                     <td>{r.phone}</td>
                     <td>{r.insurer}</td>
                     <td>{r.dealerName}</td>
+                    <td>{r.managerName}</td>
                   </tr>
                 ))}
               </tbody>
@@ -769,7 +788,7 @@ export default function Home({
         <div className="scope-out">
           <h3>실제 서비스 전환 시 필요한 것</h3>
           <ul>
-            <li><MockBadge /> 표시가 붙은 섹션(앱가입현황, 하루 갱신 건, 인센티브 요율)은 실제 데이터 소스가 생기기 전까지 샘플입니다</li>
+            <li><MockBadge /> 표시가 붙은 섹션(앱가입현황, 갱신 관리, 인센티브 요율)은 실제 데이터 소스가 생기기 전까지 샘플입니다</li>
             <li>매니저별 목표매출은 전사 목표(10억)만 반영했고, 개별 목표는 입력 UI만 만들어뒀습니다 — 값 저장은 브라우저 로컬에만 됩니다</li>
             <li>상세검색(주민번호/핸드폰/차량번호)은 이 데모 범위에서 빼고 별도로 개발 요청 예정입니다</li>
             <li>자세한 데이터 매핑·조인 기준은 별도 공유된 배치도 문서를 참고</li>
