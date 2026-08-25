@@ -409,15 +409,7 @@ export default function Home({
 
         <section className="section">
           <div className="section-head">
-            <h2>선택 기간 예상 인센티브</h2>
-            <MockBadge>샘플 요율</MockBadge>
-          </div>
-          <IncentivePanel premiumSum={agg.totals.premiumSum} />
-        </section>
-
-        <section className="section">
-          <div className="section-head">
-            <h2>선택 기간 목표매출 달성률</h2>
+            <h2>개인별 목표 매출 달성률</h2>
           </div>
           <TargetPanel
             scopeKey={manager}
@@ -429,7 +421,15 @@ export default function Home({
 
         <section className="section">
           <div className="section-head">
-            <h2>비견(비교견적완료) 퍼널{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
+            <h2>예상 인센티브</h2>
+            <MockBadge>샘플 요율</MockBadge>
+          </div>
+          <IncentivePanel premiumSum={agg.totals.premiumSum} />
+        </section>
+
+        <section className="section">
+          <div className="section-head">
+            <h2>비교견적 추적{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
           </div>
           <p className="section-note">
             상태전환이력을 파싱해 만든 실제 지표입니다. 다만 이 raw pull은 이미 성사된 건만 담고 있어, "비견 후 이탈"까지 포함한 진짜
