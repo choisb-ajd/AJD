@@ -145,7 +145,7 @@ _CONTRACT_CTE = """
                CV.COUNSEL_VEHICLE_ID,
                CV.CONTRACT_AMOUNT,
                CV.REGISTRATION_TYPE,
-               CASE WHEN CA.COUNSEL_STATUS = 'ACCUMULATE_PENDING'
+               CASE WHEN LG.PENDING_AT IS NOT NULL
                     THEN LG.PENDING_AT
                     ELSE CA.JOIN_COMPLETED_AT
                END AS CONTRACT_AT
