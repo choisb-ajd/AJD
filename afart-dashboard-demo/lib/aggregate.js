@@ -106,6 +106,7 @@ export function aggregate(rows) {
     .map(([, list]) => ({
       dealerName: list[0].dealerName,
       managerName: list[0].managerName,
+      group: list[0].group,
       count: list.length,
       premiumSum: sumPremium(list),
     }))
