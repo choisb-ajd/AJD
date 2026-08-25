@@ -106,7 +106,7 @@ export default function Home({
   const [manager, setManager] = useState("ALL");
   const [period, setPeriod] = useState("monthly");
   const [dealerSort, setDealerSort] = useState("premiumSum");
-  const [giftShipDates, setGiftShipDates] = useState({});
+  const [giftShipDate, setGiftShipDate] = useState("");
 
   const resetFilters = () => {
     setDateFrom(defaultDateFrom);
@@ -720,6 +720,10 @@ export default function Home({
         <section className="section">
           <div className="section-head">
             <h2>주유권 발송 대상 리스트</h2>
+            <div className="filter-field">
+              <label>발송예정일자</label>
+              <input type="date" value={giftShipDate} onChange={(e) => setGiftShipDate(e.target.value)} />
+            </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span className="chip gift">가입완료 + 주유권 선택 고객</span>
               <button type="button" className="btn-primary">
@@ -729,7 +733,7 @@ export default function Home({
           </div>
           <p className="section-note">
             {gift.summary.map((g) => `${g.giftName} ${g.count}건`).join(" · ") || "해당 기간에 주유권 발송 대상이 없습니다."}
-            {gift.summary.length > 0 && ` · 총 ${formatCount(gift.list.length)}`}
+            {gift.summary.length > 0 && ` · 총 ${formatCount(gift.list.length)}`} — 이 목록 전체를 위에서 고른 발송예정일자에 일괄 발송합니다.
           </p>
           <div className="table-wrap">
             <table className="data">
@@ -740,7 +744,6 @@ export default function Home({
                   <th>연락처</th>
                   <th>권종</th>
                   <th>담당 딜러</th>
-                  <th>발송예정일자</th>
                 </tr>
               </thead>
               <tbody>
@@ -751,13 +754,6 @@ export default function Home({
                     <td>{g.phone}</td>
                     <td>{g.giftName}</td>
                     <td>{g.dealerName}</td>
-                    <td>
-                      <input
-                        type="date"
-                        value={giftShipDates[i] ?? ""}
-                        onChange={(e) => setGiftShipDates((prev) => ({ ...prev, [i]: e.target.value }))}
-                      />
-                    </td>
                   </tr>
                 ))}
               </tbody>
