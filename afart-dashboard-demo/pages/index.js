@@ -733,7 +733,7 @@ export default function Home({
           </div>
           <p className="section-note">
             {gift.summary.map((g) => `${g.giftName} ${g.count}건`).join(" · ") || "해당 기간에 주유권 발송 대상이 없습니다."}
-            {gift.summary.length > 0 && ` · 총 ${formatCount(gift.list.length)}`} — 이 목록 전체를 위에서 고른 발송예정일자에 일괄 발송합니다.
+            {gift.summary.length > 0 && ` · 총 ${formatCount(gift.list.length)}`} — 위에서 고른 발송예정일자가 이 목록 전체에 일괄 적용됩니다.
           </p>
           <div className="table-wrap">
             <table className="data">
