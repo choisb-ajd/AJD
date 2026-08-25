@@ -123,16 +123,8 @@ export default function Home({
   const agg = useMemo(() => aggregate(scopeRows), [scopeRows]);
   const aggAll = useMemo(() => aggregate(rangeRows), [rangeRows]);
 
-  // 기간별 실적은 상단 날짜 필터와 별개로 자체 윈도우를 쓴다 (매니저 필터는 그대로 적용):
-  // 월별 탭은 최근 6개월, 일별/주별 탭은 최근 1개월.
-  const sixMonthsStart = useMemo(() => monthsAgoStart(bounds.max, 6), [bounds.max]);
+  // 직전 동기간 비교용 — "이번달 1일" 기준점만 필요하다 (상단 날짜 필터와는 별개).
   const oneMonthStart = useMemo(() => monthsAgoStart(bounds.max, 1), [bounds.max]);
-  const trendDateFrom = period === "monthly" ? sixMonthsStart : oneMonthStart;
-  const trendRows = useMemo(
-    () => filterRows(rows, { dateFrom: trendDateFrom, dateTo: bounds.max, manager }),
-    [rows, trendDateFrom, bounds.max, manager]
-  );
-  const trendAgg = useMemo(() => aggregate(trendRows), [trendRows]);
 
   // 직전 동기간 = 바로 전달의 같은 날짜 범위(이번달 1일~오늘 대비 지난달 1일~같은 일자).
   // 트렌드 탭(일/주/월)과 무관하게 항상 이번달 vs 지난달로 고정.
@@ -160,10 +152,10 @@ export default function Home({
   };
 
   const periodRows = useMemo(() => {
-    const list = trendAgg.periods[period];
+    const list = agg.periods[period];
     const chartSlice = period === "daily" ? list.slice(-30) : list;
     return { table: [...list].reverse(), chart: chartSlice };
-  }, [trendAgg, period]);
+  }, [agg, period]);
 
   const dealerTop = useMemo(() => {
     return [...agg.dealerRank].sort((a, b) => b[dealerSort] - a[dealerSort]).slice(0, 15);
@@ -307,8 +299,8 @@ export default function Home({
             </div>
           </div>
           <p className="section-note">
-            숫자로 확인하는 실적표가 기본이고, 막대(원수보험료)·선(체결건수) 그래프는 추세 파악용 보조 지표입니다. 상단 날짜 필터와
-            무관하게 {period === "monthly" ? "최근 6개월" : "최근 1개월"}({trendDateFrom} ~ {bounds.max}) 추세를 보여줍니다.
+            숫자로 확인하는 실적표가 기본이고, 막대(원수보험료)·선(체결건수) 그래프는 추세 파악용 보조 지표입니다. 상단 날짜 필터에서
+            고른 기간({dateFrom} ~ {dateTo}) 기준으로 집계됩니다 — 첫 화면 기본값은 이번달 1일~오늘입니다.
           </p>
           <div className="compare-row">
             <span className="compare-label">
