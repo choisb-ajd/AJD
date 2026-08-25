@@ -22,6 +22,7 @@ import TargetPanel from "../components/TargetPanel";
 import IncentivePanel from "../components/IncentivePanel";
 import MockBadge from "../components/MockBadge";
 import SalesRawList from "../components/SalesRawList";
+import MonthTargetCard from "../components/MonthTargetCard";
 import { GROUPS } from "../lib/groups";
 import { generateAppSignups, RENEWAL_SAMPLE, daysUntil, shortDateToFull } from "../lib/mockData";
 
@@ -256,10 +257,12 @@ export default function Home({
               {formatWon(agg.totals.premiumSum)}
             </div>
           </div>
-          <div className="kpi-card">
-            <div className="label">건당 평균 보험료</div>
-            <div className="value">{formatCompactWon(agg.totals.avgPremium)}</div>
-          </div>
+          <MonthTargetCard
+            scopeKey={manager}
+            monthKey={bounds.max.slice(0, 7)}
+            premiumSum={curCompareAgg.totals.premiumSum}
+            defaultTarget={manager === "ALL" ? COMPANY_MONTHLY_TARGET : 0}
+          />
           <div className="kpi-card">
             <div className="label">{manager === "ALL" ? "활동 딜러 수" : "담당 딜러 수"}</div>
             <div className="value">
@@ -406,6 +409,14 @@ export default function Home({
 
         <section className="section">
           <div className="section-head">
+            <h2>선택 기간 예상 인센티브</h2>
+            <MockBadge>샘플 요율</MockBadge>
+          </div>
+          <IncentivePanel premiumSum={agg.totals.premiumSum} />
+        </section>
+
+        <section className="section">
+          <div className="section-head">
             <h2>비견(비교견적완료) 퍼널{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
           </div>
           <p className="section-note">
@@ -437,26 +448,17 @@ export default function Home({
           </div>
         </section>
 
-        <div className="grid-2">
-          <section className="section">
-            <div className="section-head">
-              <h2>선택 기간 목표매출 달성률</h2>
-            </div>
-            <TargetPanel
-              scopeKey={manager}
-              rangeKey={`${dateFrom}~${dateTo}`}
-              premiumSum={agg.totals.premiumSum}
-              defaultTarget={manager === "ALL" ? COMPANY_MONTHLY_TARGET : 0}
-            />
-          </section>
-          <section className="section">
-            <div className="section-head">
-              <h2>선택 기간 예상 인센티브</h2>
-              <MockBadge>샘플 요율</MockBadge>
-            </div>
-            <IncentivePanel premiumSum={agg.totals.premiumSum} />
-          </section>
-        </div>
+        <section className="section">
+          <div className="section-head">
+            <h2>선택 기간 목표매출 달성률</h2>
+          </div>
+          <TargetPanel
+            scopeKey={manager}
+            rangeKey={`${dateFrom}~${dateTo}`}
+            premiumSum={agg.totals.premiumSum}
+            defaultTarget={manager === "ALL" ? COMPANY_MONTHLY_TARGET : 0}
+          />
+        </section>
 
         <section className="section">
           <div className="section-head">
