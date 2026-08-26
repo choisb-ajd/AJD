@@ -10,13 +10,15 @@ const HEADER_MAP = [
   "customerId", // 고객ID
   "customerName", // 고객명 (마스킹됨)
   "phone", // 연락처 (마스킹됨)
-  "vin", // 차량차대번호
+  "plateNumber", // 차량번호
+  "vin", // 차대번호
   "premium", // 보험료
   "insurer", // 가입보험사
   "joinType", // 가입유형 (CM/TM/OFFLINE)
   "insuranceKind", // 보험종류
   "vehicleKind", // 차량구분
   "contractDate", // 체결일자
+  "expiryDate", // 만기일자
   "currentStatus", // 현재상태 (counsel_status)
   "statusHistory", // 상태전환이력 "A(MM-DD HH:MM) → B(MM-DD HH:MM) → ..."
   "giftName", // 주유권
@@ -25,7 +27,8 @@ const HEADER_MAP = [
   "dealerId", // 딜러ID
   "dealerType", // 딜러유형 (business_type)
   "dealerStatus", // 딜러상태 (business_card_status)
-  "managerName", // 매니저이름 (counsel_manager)
+  "managerName", // 상담(체결)매니저 (counsel_manager_id)
+  "dealerManagerName", // 딜러전담매니저 (users.manager_id)
 ];
 
 function parseCsv(text) {
@@ -36,7 +39,7 @@ function parseCsv(text) {
     if (cols.length < HEADER_MAP.length) continue;
     const row = {};
     HEADER_MAP.forEach((key, idx) => {
-      row[key] = (cols[idx] ?? "").trim();
+      row[key] = (cols[idx] ?? "").trim().replace(/^"|"$/g, "");
     });
     row.premium = row.premium === "" ? null : Number(row.premium);
     if (Number.isNaN(row.premium)) row.premium = null;
@@ -195,8 +198,7 @@ export function toCancelledHistoryRows(rawRows) {
 }
 
 // 매출 로우 데이터 리스트(/api/sales)용 — 기간으로 걸러 필요한 컬럼만 내려준다.
-// 만기일자는 이 raw pull에 없는 필드라 항상 빈 값으로 내려가고, 화면에서 "-"로 표시한다.
-// 딜러 전담 매니저 컬럼도 이 raw pull엔 상담(체결)매니저와 같은 매니저이름 컬럼 하나뿐이라 동일한 값이 들어간다.
+// 차량(차대)번호는 차량번호가 있으면 그걸, 없으면 차대번호를 보여준다 (둘 다 비어있는 행도 있음).
 export function toSalesRows(rawRows, { dateFrom, dateTo }) {
   return rawRows
     .filter((r) => {
@@ -208,13 +210,27 @@ export function toSalesRows(rawRows, { dateFrom, dateTo }) {
     .map((r) => ({
       channel: r.channel || "기타",
       customerName: r.customerName || "",
-      vin: r.vin || "",
-      expiryDate: "",
+      vin: r.plateNumber || r.vin || "",
+      expiryDate: r.expiryDate || "",
       premium: r.premium,
       contractDate: r.contractDate,
       counselManagerName: r.managerName || "미배정",
       dealerName: r.dealerName || "미상",
-      dealerManagerName: r.managerName || "미배정",
+      dealerManagerName: r.dealerManagerName || "미배정",
     }))
     .sort((a, b) => (a.contractDate < b.contractDate ? 1 : -1));
+}
+
+// 갱신 관리 — 만기일자가 있는 건을 전부 후보로 두고, 화면에서 "오늘로부터 N일 이내" 필터를 건다.
+export function toRenewalRows(rawRows) {
+  return rawRows
+    .filter((r) => r.expiryDate && isEligibleDealer(r))
+    .map((r) => ({
+      dueDate: r.expiryDate,
+      customerName: r.customerName || "",
+      phone: r.phone || "",
+      insurer: r.insurer || "",
+      dealerName: r.dealerName || "미상",
+      managerName: r.managerName || "미배정",
+    }));
 }
