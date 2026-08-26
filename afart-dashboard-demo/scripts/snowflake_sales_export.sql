@@ -13,11 +13,12 @@
 -- 그레인: 상담(counsel_application) x 차량(counsel_vehicle) 1행 = 기존 raw CSV와 동일.
 --        차량이 여러 대인 상담은 여러 행으로 나옵니다 (기존 파일과 동일한 방식).
 --
--- ⚠ 확인 필요한 가정 2가지 (제가 ERD만 보고 추정한 부분입니다 — 실행 결과 보고 이상하면 알려주세요):
---   1) "영업채널"(딜러앱/기타)은 counsel_application에 해당 컬럼이 없어서
---      users.sales_channel_id → common_code 조인으로 가져오는 걸로 가정했습니다.
---      group_code가 실제로 뭔지(예: 'SALES_CHANNEL') 확인하고 필요하면 아래
---      WHERE sc.group_code = '...' 조건을 채워주세요.
+-- ⚠ 확인 필요한 사항:
+--   1) "영업채널"(딜러앱/기타) 원본 컬럼을 아직 못 찾았습니다.
+--      COMMON_CODE의 SALES_CHANNEL 그룹은 오프팀/B2B/프로모션/GMT/겟차/mail 등
+--      세분화된 제휴채널 코드표라서 딜러앱/기타 이분류와는 다른 값입니다 (확인 완료 — 오답).
+--      users.sales_channel_id 조인은 일단 뺐습니다. 실제 소스를 아시면 알려주시거나,
+--      백엔드에 확인 후 아래 "영업채널" 컬럼(NULL로 비워둠)에 채워넣으면 됩니다.
 --   2) "가입유형"(CM/TM/OFFLINE)은 counsel_application.channel_path를 그대로
 --      썼습니다 (코드가 raw 문자열로 저장되어 있다고 가정).
 -- ============================================================================
@@ -77,7 +78,7 @@ masked AS (
 )
 
 SELECT
-  sc.common_code_name                                                  AS "영업채널",
+  NULL                                                                  AS "영업채널", -- TODO: 실제 소스 확인 후 채우기
   m.counsel_id                                                         AS "상담ID",
   m.customer_id                                                        AS "고객ID",
   CASE
@@ -118,5 +119,4 @@ JOIN status_agg sa        ON sa.counsel_id = m.counsel_id
 LEFT JOIN AJDCAR_PROD.PUBLIC.GIFT g           ON g.gift_id = m.gift_id
 LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER cm       ON cm.id = m.counsel_manager_id
 LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER dm       ON dm.id = m.dealer_manager_id
-LEFT JOIN AJDCAR_PROD.PUBLIC.COMMON_CODE sc   ON sc.code_id = m.sales_channel_id
 ORDER BY sa.contract_at DESC;
