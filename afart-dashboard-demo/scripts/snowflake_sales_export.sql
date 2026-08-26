@@ -4,6 +4,16 @@
 -- 사용법: Snowflake 워크시트에서 그대로 실행 → 결과창 우측 상단 "Download Results"
 --        → CSV로 다운로드 → afart-dashboard-demo/data/raw_query.csv 교체.
 --
+-- ⚠ 실행 전 확인:
+--   1) 워크시트 상단에서 Warehouse / Database(+Schema)를 먼저 선택하세요.
+--      선택 안 하면 모든 테이블 참조가 "does not exist or not authorized"로 실패합니다.
+--   2) 아래 테이블 중 하나라도 안 잡히면, 먼저 이 쿼리로 실제 이름/스키마를 확인하세요:
+--        SHOW TABLES LIKE '%COUNSEL%';
+--        SHOW TABLES LIKE '%USER%';
+--        SHOW TABLES LIKE '%MANAGER%';
+--      다른 스키마에 있다면 아래 FROM/JOIN의 테이블명을
+--      DATABASE.SCHEMA.TABLE_NAME 형태로 바꿔주세요.
+--
 -- 그레인: 상담(counsel_application) x 차량(counsel_vehicle) 1행 = 기존 raw CSV와 동일.
 --        차량이 여러 대인 상담은 여러 행으로 나옵니다 (기존 파일과 동일한 방식).
 --
