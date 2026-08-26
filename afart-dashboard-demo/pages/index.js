@@ -6,6 +6,7 @@ import {
   toGiftRows,
   toPendingRows,
   toCancelledHistoryRows,
+  toRenewalRows,
 } from "../lib/data";
 import { unpackRows } from "../lib/pack";
 import { aggregate, filterRows, filterGiftRows, filterListRows } from "../lib/aggregate";
@@ -24,7 +25,7 @@ import MockBadge from "../components/MockBadge";
 import SalesRawList from "../components/SalesRawList";
 import MonthTargetCard from "../components/MonthTargetCard";
 import { GROUPS } from "../lib/groups";
-import { generateAppSignups, RENEWAL_SAMPLE, daysUntil, shortDateToFull } from "../lib/mockData";
+import { generateAppSignups } from "../lib/mockData";
 
 const COMPANY_MONTHLY_TARGET = 1_000_000_000; // 원수보험료 기준 월 목표 10억원 (직접 전달받은 값)
 
@@ -35,6 +36,7 @@ export async function getStaticProps() {
   const giftRows = toGiftRows(raw);
   const pendingRows = toPendingRows(raw);
   const cancelledRows = toCancelledHistoryRows(raw);
+  const renewalRows = toRenewalRows(raw);
   const dateMin = packedRows.reduce((m, r) => (m === "" || r[0] < m ? r[0] : m), "");
   const dateMax = packedRows.reduce((m, r) => (m === "" || r[0] > m ? r[0] : m), "");
   const managers = [...new Set(raw.map((r) => r.managerName).filter(Boolean))].sort();
@@ -44,10 +46,18 @@ export async function getStaticProps() {
       giftRows,
       pendingRows,
       cancelledRows,
+      renewalRows,
       managers,
       bounds: { min: dateMin, max: dateMax },
     },
   };
+}
+
+// "YYYY-MM-DD" 두 날짜 사이의 일수 (due - today).
+function daysUntilFull(dueDateStr, todayStr) {
+  const due = new Date(dueDateStr + "T00:00:00Z");
+  const today = new Date(todayStr + "T00:00:00Z");
+  return Math.round((due - today) / 86400000);
 }
 
 // "YYYY-MM-DD" 기준으로 n개월 전 달의 1일을 돌려준다 (n=6, 기준일이 8월이면 3월 1일).
@@ -96,6 +106,7 @@ export default function Home({
   giftRows,
   pendingRows,
   cancelledRows,
+  renewalRows,
   managers,
   bounds,
 }) {
@@ -188,9 +199,13 @@ export default function Home({
   );
 
   // 갱신 관리 — 오늘(bounds.max) 기준으로 만기가 renewalDaysAhead일 이내로 도래한 건만, 가까운 순으로.
-  const renewalUpcoming = RENEWAL_SAMPLE.map((r) => ({ ...r, daysLeft: daysUntil(r.dueDate, bounds.max) }))
-    .filter((r) => r.daysLeft <= renewalDaysAhead)
-    .sort((a, b) => a.daysLeft - b.daysLeft);
+  const renewalUpcoming = useMemo(() => {
+    return renewalRows
+      .filter((r) => manager === "ALL" || r.managerName === manager)
+      .map((r) => ({ ...r, daysLeft: daysUntilFull(r.dueDate, bounds.max) }))
+      .filter((r) => r.daysLeft <= renewalDaysAhead)
+      .sort((a, b) => a.daysLeft - b.daysLeft);
+  }, [renewalRows, manager, bounds.max, renewalDaysAhead]);
   const pendingShown = pending.slice(0, 30);
   const topManagerPremium = aggAll.managerRank[0]?.premiumSum || 1;
 
@@ -226,7 +241,7 @@ export default function Home({
         만든 프로토타입입니다. 매니저·딜러유형·상태이력·지급대기/가입취소는 실제 데이터를 그대로 씁니다. <MockBadge /> 표시가 붙은
         영역만 이 raw 데이터에 없는 값이라 시연을 위해 만든 샘플입니다.
         <ul>
-          <li>앱가입현황, 갱신 관리, 인센티브 요율은 이 raw pull에 아예 없는 값이라 샘플로 대체했습니다.</li>
+          <li>앱가입현황, 인센티브 요율은 이 raw pull에 아예 없는 값이라 샘플로 대체했습니다.</li>
           <li>신차딜러는 business_sub_type(수입/국산)이 없어 하나로 묶었습니다 — 원래 배치도의 G1/G2 세분화는 불가합니다.</li>
           <li>비견 퍼널의 "전환율"은 이 raw pull이 이미 성사된 건만 담고 있어, 손실 건을 포함한 진짜 전환율이 아니라 "체결 건 중 비교견적을 거친 비율"입니다.</li>
         </ul>
@@ -364,10 +379,9 @@ export default function Home({
             <h2>매출 리스트</h2>
           </div>
           <p className="section-note">
-            기간을 지정해서 원본에 가까운 건별 데이터를 확인합니다. 만기일자는 이 raw pull에 없는 필드라 "-"로 표시됩니다.
+            기간을 지정해서 원본에 가까운 건별 데이터를 확인합니다.
             상담(체결)매니저와 딜러 전담 매니저가 <span style={{ color: "var(--warn)", fontWeight: 600 }}>다른 행은 연한 주황</span>으로
-            표시됩니다 — 다만 이 raw pull엔 매니저이름 컬럼이 하나뿐이라 두 값이 항상 같게 채워져 있어, 지금은 실제로 주황 표시가
-            나타나지 않습니다. 실제 서비스에서 users.manager_id(딜러 담당)와 counsel_manager_id(상담 담당)를 따로 조인하면 동작합니다.
+            표시됩니다.
           </p>
           <SalesRawList initialFrom={dateFrom} initialTo={dateTo} bounds={bounds} />
         </section>
@@ -609,7 +623,6 @@ export default function Home({
         <section className="section">
           <div className="section-head">
             <h2>갱신 관리</h2>
-            <MockBadge />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, fontSize: 13 }}>
             <span style={{ color: "var(--ink-muted)" }}>만기 도래</span>
@@ -646,7 +659,7 @@ export default function Home({
                 )}
                 {renewalUpcoming.map((r, i) => (
                   <tr key={i}>
-                    <td>{shortDateToFull(r.dueDate)}</td>
+                    <td>{r.dueDate}</td>
                     <td style={{ textAlign: "left" }}>{r.customerName}</td>
                     <td>{r.phone}</td>
                     <td>{r.insurer}</td>
@@ -790,7 +803,7 @@ export default function Home({
         <div className="scope-out">
           <h3>실제 서비스 전환 시 필요한 것</h3>
           <ul>
-            <li><MockBadge /> 표시가 붙은 섹션(앱가입현황, 갱신 관리, 인센티브 요율)은 실제 데이터 소스가 생기기 전까지 샘플입니다</li>
+            <li><MockBadge /> 표시가 붙은 섹션(앱가입현황, 인센티브 요율)은 실제 데이터 소스가 생기기 전까지 샘플입니다</li>
             <li>매니저별 목표매출은 전사 목표(10억)만 반영했고, 개별 목표는 입력 UI만 만들어뒀습니다 — 값 저장은 브라우저 로컬에만 됩니다</li>
             <li>상세검색(주민번호/핸드폰/차량번호)은 이 데모 범위에서 빼고 별도로 개발 요청 예정입니다</li>
             <li>자세한 데이터 매핑·조인 기준은 별도 공유된 배치도 문서를 참고</li>
