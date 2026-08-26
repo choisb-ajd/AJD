@@ -14,13 +14,12 @@
 --        차량이 여러 대인 상담은 여러 행으로 나옵니다 (기존 파일과 동일한 방식).
 --
 -- ⚠ 확인 필요한 사항:
---   1) "영업채널"(딜러앱/기타) 원본 컬럼을 아직 못 찾았습니다.
---      COMMON_CODE의 SALES_CHANNEL 그룹은 오프팀/B2B/프로모션/GMT/겟차/mail 등
---      세분화된 제휴채널 코드표라서 딜러앱/기타 이분류와는 다른 값입니다 (확인 완료 — 오답).
---      users.sales_channel_id 조인은 일단 뺐습니다. 실제 소스를 아시면 알려주시거나,
---      백엔드에 확인 후 아래 "영업채널" 컬럼(NULL로 비워둠)에 채워넣으면 됩니다.
---   2) "가입유형"(CM/TM/OFFLINE)은 counsel_application.channel_path를 그대로
---      썼습니다 (코드가 raw 문자열로 저장되어 있다고 가정).
+--   1) "영업채널"은 counsel_application.channel_path를 CASE로 매핑해서 만듭니다
+--      (DEALER_APP→딜러앱 / RENEWAL→갱신 / CS→CS / 그 외→기타). 확인 완료.
+--   2) "가입유형"(CM/TM/OFFLINE)의 실제 소스 컬럼은 아직 못 찾았습니다.
+--      원래 channel_path를 가입유형으로 가정했었는데, channel_path는 위처럼
+--      영업채널(DEALER_APP/RENEWAL/CS)용 값이라 가입유형과는 다른 컬럼입니다.
+--      일단 NULL로 비워뒀습니다 — 아시면 알려주세요.
 -- ============================================================================
 
 WITH status_agg AS (
@@ -78,7 +77,12 @@ masked AS (
 )
 
 SELECT
-  NULL                                                                  AS "영업채널", -- TODO: 실제 소스 확인 후 채우기
+  CASE m.channel_path
+    WHEN 'DEALER_APP' THEN '딜러앱'
+    WHEN 'RENEWAL'    THEN '갱신'
+    WHEN 'CS'         THEN 'CS'
+    ELSE '기타'
+  END                                                                   AS "영업채널",
   m.counsel_id                                                         AS "상담ID",
   m.customer_id                                                        AS "고객ID",
   CASE
@@ -93,7 +97,7 @@ SELECT
   m.vin                                                                 AS "차대번호",
   m.contract_amount                                                    AS "보험료",
   m.join_insurer_code                                                  AS "가입보험사",
-  m.channel_path                                                       AS "가입유형",
+  NULL                                                                  AS "가입유형", -- TODO: 실제 소스 확인 후 채우기
   m.insurance_type                                                     AS "보험종류",
   m.vehicle_usage_code                                                 AS "차량구분",
   TO_CHAR(sa.contract_at, 'YYYY-MM-DD')                                AS "체결일자",
