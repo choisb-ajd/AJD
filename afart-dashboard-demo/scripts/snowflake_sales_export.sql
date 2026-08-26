@@ -1,23 +1,19 @@
 -- ============================================================================
 -- AFART 실적 대시보드 수기 업데이트용 매출 데이터 export 쿼리 (Snowflake)
 --
--- 사용법: Snowflake 워크시트에서 그대로 실행 → 결과창 우측 상단 "Download Results"
---        → CSV로 다운로드 → afart-dashboard-demo/data/raw_query.csv 교체.
+-- 스키마 확인 완료: AJDCAR_PROD.PUBLIC (2026-08-25 SHOW TABLES로 실물 확인됨)
+--   COUNSEL_APPLICATION / COUNSEL_VEHICLE / COUNSEL_STATUS_LOG / CUSTOMER /
+--   USERS / MANAGER / GIFT / COMMON_CODE 전부 이 스키마에 있습니다.
 --
--- ⚠ 실행 전 확인:
---   1) 워크시트 상단에서 Warehouse / Database(+Schema)를 먼저 선택하세요.
---      선택 안 하면 모든 테이블 참조가 "does not exist or not authorized"로 실패합니다.
---   2) 아래 테이블 중 하나라도 안 잡히면, 먼저 이 쿼리로 실제 이름/스키마를 확인하세요:
---        SHOW TABLES LIKE '%COUNSEL%';
---        SHOW TABLES LIKE '%USER%';
---        SHOW TABLES LIKE '%MANAGER%';
---      다른 스키마에 있다면 아래 FROM/JOIN의 테이블명을
---      DATABASE.SCHEMA.TABLE_NAME 형태로 바꿔주세요.
+-- 사용법: Snowflake 워크시트에서 그대로 실행 (DB/스키마 따로 안 골라도 됨,
+--        아래 테이블명에 AJDCAR_PROD.PUBLIC.을 이미 붙여놨습니다)
+--        → 결과창 우측 상단 "Download Results" → CSV로 다운로드
+--        → afart-dashboard-demo/data/raw_query.csv 교체.
 --
 -- 그레인: 상담(counsel_application) x 차량(counsel_vehicle) 1행 = 기존 raw CSV와 동일.
 --        차량이 여러 대인 상담은 여러 행으로 나옵니다 (기존 파일과 동일한 방식).
 --
--- ⚠ 확인 필요한 가정 2가지 (제가 ERD만 보고 추정한 부분입니다):
+-- ⚠ 확인 필요한 가정 2가지 (제가 ERD만 보고 추정한 부분입니다 — 실행 결과 보고 이상하면 알려주세요):
 --   1) "영업채널"(딜러앱/기타)은 counsel_application에 해당 컬럼이 없어서
 --      users.sales_channel_id → common_code 조인으로 가져오는 걸로 가정했습니다.
 --      group_code가 실제로 뭔지(예: 'SALES_CHANNEL') 확인하고 필요하면 아래
@@ -38,7 +34,7 @@ WITH status_agg AS (
       csl.new_counsel_status || '(' || TO_CHAR(csl.created_at, 'MM-DD HH24:MI') || ')',
       ' → '
     ) WITHIN GROUP (ORDER BY csl.created_at)                            AS status_history
-  FROM counsel_status_log csl
+  FROM AJDCAR_PROD.PUBLIC.COUNSEL_STATUS_LOG csl
   GROUP BY csl.counsel_id
 ),
 
@@ -69,10 +65,10 @@ masked AS (
     u.business_card_status,
     u.manager_id                                                       AS dealer_manager_id,
     u.sales_channel_id
-  FROM counsel_application ca
-  JOIN counsel_vehicle cv ON cv.counsel_id = ca.counsel_id AND cv.is_deleted = 0
-  JOIN customer cu        ON cu.customer_id = ca.customer_id AND cu.is_deleted = 0
-  LEFT JOIN users u        ON u.id = ca.user_id
+  FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
+  JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv ON cv.counsel_id = ca.counsel_id AND cv.is_deleted = 0
+  JOIN AJDCAR_PROD.PUBLIC.CUSTOMER cu        ON cu.customer_id = ca.customer_id AND cu.is_deleted = 0
+  LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u        ON u.id = ca.user_id
   WHERE ca.is_deleted = 0
     AND ca.counsel_status IN ('ACCUMULATE_PENDING', 'JOIN_COMPLETED')   -- 체결 = 지급대기 + 가입완료
     AND (u.business_card_status IS NULL OR u.business_card_status <> 'REJECTED')  -- 탈퇴 딜러 제외
@@ -119,8 +115,8 @@ SELECT
   dm.name                                                               AS "딜러전담매니저"
 FROM masked m
 JOIN status_agg sa        ON sa.counsel_id = m.counsel_id
-LEFT JOIN gift g           ON g.gift_id = m.gift_id
-LEFT JOIN manager cm       ON cm.id = m.counsel_manager_id
-LEFT JOIN manager dm       ON dm.id = m.dealer_manager_id
-LEFT JOIN common_code sc   ON sc.code_id = m.sales_channel_id
+LEFT JOIN AJDCAR_PROD.PUBLIC.GIFT g           ON g.gift_id = m.gift_id
+LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER cm       ON cm.id = m.counsel_manager_id
+LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER dm       ON dm.id = m.dealer_manager_id
+LEFT JOIN AJDCAR_PROD.PUBLIC.COMMON_CODE sc   ON sc.code_id = m.sales_channel_id
 ORDER BY sa.contract_at DESC;
