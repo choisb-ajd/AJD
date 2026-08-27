@@ -190,8 +190,15 @@ table {
   margin-left: 2px;
 }
 
+.kpi-target-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
 .kpi-target-input {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   font-family: "IBM Plex Mono", monospace;
   font-size: 16px;
   font-weight: 700;
@@ -200,11 +207,22 @@ table {
   border-bottom: 1px solid var(--border);
   background: transparent;
   color: var(--ink);
-  margin-bottom: 8px;
 }
 .kpi-target-input:focus {
   outline: none;
   border-bottom-color: var(--accent);
+}
+.kpi-target-input:disabled {
+  color: var(--ink-muted);
+}
+.kpi-target-save {
+  flex: none;
+  padding: 5px 12px;
+  font-size: 12px;
+}
+.kpi-target-save:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .kpi-target-rate {
   display: flex;
