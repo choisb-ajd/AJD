@@ -58,7 +58,7 @@ export default function SalesRawList({ initialFrom, initialTo, bounds }) {
         <table className="data">
           <thead>
             <tr>
-              <th>영업채널</th>
+              <th>유입채널</th>
               <th>고객명</th>
               <th>차량(차대)번호</th>
               <th>만기일자</th>

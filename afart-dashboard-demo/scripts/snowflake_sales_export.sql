@@ -14,7 +14,7 @@
 --        차량이 여러 대인 상담은 여러 행으로 나옵니다 (기존 파일과 동일한 방식).
 --
 -- 확인 완료된 매핑:
---   - "영업채널" = counsel_application.channel_path (DEALER_APP→딜러앱 / RENEWAL→갱신 / CS→CS / 그 외→기타)
+--   - "유입채널" = counsel_application.channel_path (DEALER_APP→딜러앱 / RENEWAL→갱신 / CS→CS / 그 외→기타)
 --   - "가입유형" = counsel_application.subscription_type (원본 값 그대로 사용)
 --   - "가입보험사" = counsel_application.join_insurer_code를 한글명으로 CASE 매핑
 --   - "체결일자" = 현재 상태가 지급대기(ACCUMULATE_PENDING)면 상태이력에서 최초로
@@ -83,7 +83,7 @@ SELECT
     WHEN 'RENEWAL'    THEN '갱신'
     WHEN 'CS'         THEN 'CS'
     ELSE '기타'
-  END                                                                   AS "영업채널",
+  END                                                                   AS "유입채널",
   m.counsel_id                                                         AS "상담ID",
   m.customer_id                                                        AS "고객ID",
   CASE

@@ -629,7 +629,7 @@ export default function Home({
 
             <div>
               <div className="section-head">
-                <h2>영업채널별 실적</h2>
+                <h2>유입채널별 실적</h2>
               </div>
               <div className="table-wrap">
                 <table className="data">
