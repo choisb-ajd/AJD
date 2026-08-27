@@ -60,23 +60,23 @@ export default function FilterBar({
       </div>
 
       <div className="filter-field">
-        <label>매니저</label>
-        <select value={manager} onChange={(e) => onManager(e.target.value)}>
-          <option value="ALL">전체 (관리자 보기)</option>
-          {managers.map((m) => (
-            <option key={m} value={m}>
-              {m}
+        <label>소속</label>
+        <select value={affiliation} onChange={(e) => onAffiliation(e.target.value)}>
+          {affiliationOptions.map((a) => (
+            <option key={a} value={a}>
+              {a}
             </option>
           ))}
         </select>
       </div>
 
       <div className="filter-field">
-        <label>소속</label>
-        <select value={affiliation} onChange={(e) => onAffiliation(e.target.value)}>
-          {affiliationOptions.map((a) => (
-            <option key={a} value={a}>
-              {a}
+        <label>매니저</label>
+        <select value={manager} onChange={(e) => onManager(e.target.value)}>
+          <option value="ALL">전체 (관리자 보기)</option>
+          {managers.map((m) => (
+            <option key={m} value={m}>
+              {m}
             </option>
           ))}
         </select>

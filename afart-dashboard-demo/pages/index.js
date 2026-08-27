@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Head from "next/head";
 import {
   loadRawRows,
@@ -129,6 +129,19 @@ export default function Home({
   const [dealerSort, setDealerSort] = useState("premiumSum");
   const [giftShipDate, setGiftShipDate] = useState("");
   const [renewalDaysAhead, setRenewalDaysAhead] = useState(45);
+
+  // 매니저 드롭다운은 소속 선택에 따라 재직중 + 센터상담사 권한을 가진 매니저만 나열된다.
+  // 이 raw pull의 매니저는 전부 소속=파이낸셜로 확인되어(2026-08-27), 다른 소속을 고르면
+  // 목록이 비게 된다 — 실제 서비스에서는 매니저마다 소속이 다양하게 채워져 있을 것이다.
+  const managersInAffiliation = affiliation === "파이낸셜" ? managers : [];
+
+  // 소속을 바꿔서 현재 선택된 매니저가 새 목록에 없으면 '전체'로 되돌린다.
+  useEffect(() => {
+    if (manager !== "ALL" && !managersInAffiliation.includes(manager)) {
+      setManager("ALL");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [affiliation]);
 
   const resetFilters = () => {
     setDateFrom(defaultDateFrom);
@@ -262,7 +275,7 @@ export default function Home({
         onDateTo={setDateTo}
         manager={manager}
         onManager={setManager}
-        managers={managers}
+        managers={managersInAffiliation}
         bounds={bounds}
         onReset={resetFilters}
         affiliation={affiliation}
@@ -278,7 +291,7 @@ export default function Home({
           <li>앱가입현황, 인센티브 요율은 이 raw pull에 아예 없는 값이라 샘플로 대체했습니다.</li>
           <li>신차딜러는 business_sub_type(수입/국산)이 없어 하나로 묶었습니다 — 원래 배치도의 G1/G2 세분화는 불가합니다.</li>
           <li>비견 퍼널의 "전환율"은 이 raw pull이 이미 성사된 건만 담고 있어, 손실 건을 포함한 진짜 전환율이 아니라 "체결 건 중 비교견적을 거친 비율"입니다.</li>
-          <li>"소속" 선택은 실제로는 로그인한 사용자가 센터상담사 권한일 때만 노출되어야 하지만, 이 데모엔 로그인이 없어 항상 노출하며 데이터 필터링에도 아직 연결되지 않습니다.</li>
+          <li>"소속"에 따라 매니저 드롭다운이 필터링됩니다(소속 + 재직중 + 센터상담사 권한을 만족하는 매니저만 노출). 이 raw pull의 매니저는 전부 소속=파이낸셜로 확인되어, 인슈어런스·파트너스를 고르면 매니저 목록이 비게 됩니다(실제 서비스에서는 매니저마다 소속이 다양합니다).</li>
         </ul>
       </div>
 
