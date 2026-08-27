@@ -77,6 +77,36 @@ table {
   font-weight: 600;
 }
 
+.role-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.role-toggle-label {
+  font-size: 11px;
+  color: var(--ink-faint);
+  margin-right: 2px;
+  white-space: nowrap;
+}
+.role-toggle button {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.role-toggle button.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
 /* ---------- demo banner ---------- */
 .demo-banner {
   margin: 20px 24px 0;
