@@ -16,6 +16,7 @@ export function unpackRows(packed) {
       prospectToCompDays,
       compToJoinDays,
       currentStatus,
+      dealerManagerName,
     ]) => ({
       date,
       premium,
@@ -30,6 +31,7 @@ export function unpackRows(packed) {
       prospectToCompDays,
       compToJoinDays,
       currentStatus,
+      dealerManagerName,
     })
   );
 }
