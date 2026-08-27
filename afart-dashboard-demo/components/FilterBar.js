@@ -8,6 +8,10 @@ export default function FilterBar({
   managers,
   bounds,
   onReset,
+  showAffiliation,
+  affiliation,
+  onAffiliation,
+  affiliationOptions,
 }) {
   return (
     <div className="filter-bar">
@@ -67,6 +71,19 @@ export default function FilterBar({
           ))}
         </select>
       </div>
+
+      {showAffiliation && (
+        <div className="filter-field">
+          <label>소속</label>
+          <select value={affiliation} onChange={(e) => onAffiliation(e.target.value)}>
+            {affiliationOptions.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <button className="filter-reset" onClick={onReset}>
         필터 초기화
