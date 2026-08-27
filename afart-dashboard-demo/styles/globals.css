@@ -77,6 +77,13 @@ table {
   font-weight: 600;
 }
 
+.period-block-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--warn);
+  margin: 0 0 10px;
+}
+
 .role-toggle {
   display: flex;
   align-items: center;

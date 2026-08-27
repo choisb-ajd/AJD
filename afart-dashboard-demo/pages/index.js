@@ -130,7 +130,6 @@ export default function Home({
   // 관리자는 매니저를 바꿔가며 각자의 목표를 설정할 수 있고, 센터상담사는 항상 읽기 전용이다.
   const [viewerRole, setViewerRole] = useState("ADMIN");
   const isViewerAdmin = viewerRole === "ADMIN";
-  const [period, setPeriod] = useState("monthly");
   const [dealerSort, setDealerSort] = useState("premiumSum");
   const [giftShipDate, setGiftShipDate] = useState("");
   const [renewalDaysAhead, setRenewalDaysAhead] = useState(45);
@@ -192,10 +191,13 @@ export default function Home({
   };
 
   const periodRows = useMemo(() => {
-    const list = agg.periods[period];
-    const chartSlice = period === "daily" ? list.slice(-30) : list;
-    return { table: [...list].reverse(), chart: chartSlice };
-  }, [agg, period]);
+    const build = (key) => {
+      const list = agg.periods[key];
+      const chartSlice = key === "daily" ? list.slice(-30) : list;
+      return { table: [...list].reverse(), chart: chartSlice };
+    };
+    return { daily: build("daily"), weekly: build("weekly"), monthly: build("monthly") };
+  }, [agg]);
 
   const dealerTop = useMemo(() => {
     return [...agg.dealerRank].sort((a, b) => b[dealerSort] - a[dealerSort]).slice(0, 15);
@@ -408,13 +410,6 @@ export default function Home({
         <section className="section">
           <div className="section-head">
             <h2>기간별 실적{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
-            <div className="toggle-group">
-              {PERIOD_TABS.map((t) => (
-                <button key={t.key} className={period === t.key ? "active" : ""} onClick={() => setPeriod(t.key)}>
-                  {t.label}
-                </button>
-              ))}
-            </div>
           </div>
           <p className="section-note">
             숫자로 확인하는 실적표가 기본이고, 막대(원수보험료)·선(체결건수) 그래프는 추세 파악용 보조 지표입니다. 상단 날짜 필터에서
@@ -437,37 +432,43 @@ export default function Home({
               </span>
             )}
           </div>
-          <div className="card">
-            <PeriodChart
-              data={periodRows.chart.map((r) => ({
-                label: formatDateLabel(r.label ?? r.key),
-                premiumSum: r.premiumSum,
-                count: r.count,
-              }))}
-            />
-          </div>
-          <div className="table-wrap table-scroll-6" style={{ marginTop: 12 }}>
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>기간</th>
-                  <th>체결건수</th>
-                  <th>원수보험료 합계</th>
-                  <th>건당 평균</th>
-                </tr>
-              </thead>
-              <tbody>
-                {periodRows.table.map((r) => (
-                  <tr key={r.key}>
-                    <td>{formatDateLabel(r.label ?? r.key)}</td>
-                    <td>{formatCount(r.count)}</td>
-                    <td>{formatWon(r.premiumSum)}</td>
-                    <td>{formatWon(r.avgPremium)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+
+          {PERIOD_TABS.map((t, i) => (
+            <div key={t.key} className="period-block" style={{ marginTop: i === 0 ? 0 : 28 }}>
+              <h3 className="period-block-title">{t.label}</h3>
+              <div className="card">
+                <PeriodChart
+                  data={periodRows[t.key].chart.map((r) => ({
+                    label: formatDateLabel(r.label ?? r.key),
+                    premiumSum: r.premiumSum,
+                    count: r.count,
+                  }))}
+                />
+              </div>
+              <div className="table-wrap table-scroll-6" style={{ marginTop: 12 }}>
+                <table className="data">
+                  <thead>
+                    <tr>
+                      <th>기간</th>
+                      <th>체결건수</th>
+                      <th>원수보험료 합계</th>
+                      <th>건당 평균</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {periodRows[t.key].table.map((r) => (
+                      <tr key={r.key}>
+                        <td>{formatDateLabel(r.label ?? r.key)}</td>
+                        <td>{formatCount(r.count)}</td>
+                        <td>{formatWon(r.premiumSum)}</td>
+                        <td>{formatWon(r.avgPremium)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
         </section>
 
         <section className="section">
