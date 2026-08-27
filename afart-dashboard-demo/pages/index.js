@@ -261,9 +261,21 @@ export default function Home({
         <div className="kpi-row">
           <div className="kpi-card">
             <div className="label">체결건수 합계</div>
-            <div className="value">
-              {agg.totals.count.toLocaleString("ko-KR")}
-              <span className="unit">건</span>
+            <div className="kpi-split">
+              <div className="kpi-split-row">
+                <span className="kpi-split-label">가입완료</span>
+                <span className="kpi-split-value">
+                  {agg.totals.joinCompletedCount.toLocaleString("ko-KR")}
+                  <span className="unit">건</span>
+                </span>
+              </div>
+              <div className="kpi-split-row">
+                <span className="kpi-split-label">지급대기</span>
+                <span className="kpi-split-value">
+                  {agg.totals.pendingCount.toLocaleString("ko-KR")}
+                  <span className="unit">건</span>
+                </span>
+              </div>
             </div>
           </div>
           <div className="kpi-card">

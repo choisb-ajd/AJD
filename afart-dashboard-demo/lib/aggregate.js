@@ -50,6 +50,8 @@ export function filterRows(rows, { dateFrom, dateTo, manager }) {
 export function aggregate(rows) {
   const totals = {
     count: rows.length,
+    joinCompletedCount: rows.filter((r) => r.currentStatus === "JOIN_COMPLETED").length,
+    pendingCount: rows.filter((r) => r.currentStatus === "ACCUMULATE_PENDING").length,
     premiumSum: sumPremium(rows),
     dealerCount: new Set(rows.map((r) => r.dealerKey)).size,
     dateMin: rows.reduce((m, r) => (m === "" || r.date < m ? r.date : m), ""),

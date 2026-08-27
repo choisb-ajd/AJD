@@ -118,6 +118,7 @@ export const CLIENT_ROW_FIELDS = [
   "hasComparison",
   "prospectToCompDays",
   "compToJoinDays",
+  "currentStatus",
 ];
 
 export function toClientRows(rawRows) {
@@ -138,6 +139,7 @@ export function toClientRows(rawRows) {
         f.hasComparison ? 1 : 0,
         f.prospectToCompDays,
         f.compToJoinDays,
+        r.currentStatus,
       ];
     });
 }
