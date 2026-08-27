@@ -5,7 +5,7 @@ import { groupOf } from "./groups";
 const CSV_PATH = path.join(process.cwd(), "data", "raw_query.csv");
 
 const HEADER_MAP = [
-  "channel", // 영업채널
+  "channel", // 유입채널
   "counselId", // 상담ID
   "customerId", // 고객ID
   "customerName", // 고객명 (마스킹됨)
