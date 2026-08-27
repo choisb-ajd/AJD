@@ -25,7 +25,7 @@ import MockBadge from "../components/MockBadge";
 import SalesRawList from "../components/SalesRawList";
 import MonthTargetCard from "../components/MonthTargetCard";
 import { GROUPS } from "../lib/groups";
-import { generateAppSignups } from "../lib/mockData";
+import { generateAppSignups, CENTER_COUNSELOR_MANAGERS, AFFILIATION_OPTIONS } from "../lib/mockData";
 
 const COMPANY_MONTHLY_TARGET = 1_000_000_000; // 원수보험료 기준 월 목표 10억원 (직접 전달받은 값)
 
@@ -124,15 +124,20 @@ export default function Home({
   const [dateFrom, setDateFrom] = useState(defaultDateFrom);
   const [dateTo, setDateTo] = useState(defaultDateTo);
   const [manager, setManager] = useState("ALL");
+  const [affiliation, setAffiliation] = useState(AFFILIATION_OPTIONS[0]);
   const [period, setPeriod] = useState("monthly");
   const [dealerSort, setDealerSort] = useState("premiumSum");
   const [giftShipDate, setGiftShipDate] = useState("");
   const [renewalDaysAhead, setRenewalDaysAhead] = useState(45);
 
+  // 소속 선택 — 매니저가 센터상담사 권한을 가진 경우에만 노출 (mock, lib/mockData.js 참고)
+  const showAffiliation = manager !== "ALL" && CENTER_COUNSELOR_MANAGERS.includes(manager);
+
   const resetFilters = () => {
     setDateFrom(defaultDateFrom);
     setDateTo(defaultDateTo);
     setManager("ALL");
+    setAffiliation(AFFILIATION_OPTIONS[0]);
   };
 
   // 날짜만 적용 (매니저 랭킹처럼 전체 매니저를 비교할 때 사용)
@@ -263,6 +268,10 @@ export default function Home({
         managers={managers}
         bounds={bounds}
         onReset={resetFilters}
+        showAffiliation={showAffiliation}
+        affiliation={affiliation}
+        onAffiliation={setAffiliation}
+        affiliationOptions={AFFILIATION_OPTIONS}
       />
 
       <div className="demo-banner">
@@ -273,6 +282,7 @@ export default function Home({
           <li>앱가입현황, 인센티브 요율은 이 raw pull에 아예 없는 값이라 샘플로 대체했습니다.</li>
           <li>신차딜러는 business_sub_type(수입/국산)이 없어 하나로 묶었습니다 — 원래 배치도의 G1/G2 세분화는 불가합니다.</li>
           <li>비견 퍼널의 "전환율"은 이 raw pull이 이미 성사된 건만 담고 있어, 손실 건을 포함한 진짜 전환율이 아니라 "체결 건 중 비교견적을 거친 비율"입니다.</li>
+          <li>매니저 선택 시 뜨는 "소속" 선택은 센터상담사 권한 데이터가 raw pull에 없어 매니저 이름으로 지정한 mock이며, 실제 데이터 필터링에는 아직 연결되지 않습니다.</li>
         </ul>
       </div>
 
