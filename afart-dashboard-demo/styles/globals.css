@@ -163,6 +163,33 @@ table {
   margin-left: 3px;
 }
 
+.kpi-split {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.kpi-split-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.kpi-split-label {
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+.kpi-split-value {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.kpi-split-value .unit {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  margin-left: 2px;
+}
+
 .kpi-target-input {
   width: 100%;
   font-family: "IBM Plex Mono", monospace;

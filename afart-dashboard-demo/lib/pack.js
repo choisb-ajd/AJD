@@ -15,6 +15,7 @@ export function unpackRows(packed) {
       hasComparison,
       prospectToCompDays,
       compToJoinDays,
+      currentStatus,
     ]) => ({
       date,
       premium,
@@ -28,6 +29,7 @@ export function unpackRows(packed) {
       hasComparison: !!hasComparison,
       prospectToCompDays,
       compToJoinDays,
+      currentStatus,
     })
   );
 }
