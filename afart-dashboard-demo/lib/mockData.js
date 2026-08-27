@@ -1,14 +1,9 @@
 // 이 raw pull에는 없는 값들(앱가입 로그, 상태 전환 이력)을 시연 목적으로 생성한 샘플 데이터.
 // 전부 "샘플" 배지가 붙은 영역에서만 쓰인다 — 실제 서비스는 users / counsel_status_log 테이블 필요.
 
-// 소속 선택 노출 대상(센터상담사) — 실제로는 manager → manager_permission → permission →
-// permission_scope_mapping → permission_scope 체인으로 "센터상담사" 권한 보유 여부를 판별해야 하지만,
-// 이 raw pull엔 권한 데이터가 없어 매니저 이름으로 직접 지정한 mock 목록이다.
-export const CENTER_COUNSELOR_MANAGERS = [
-  "김경선", "김미희", "박순미", "송민선", "신영란", "이선", "이선이", "정혜령", "진서연", "최현정", "서지원",
-];
-
-// "소속" 선택지 — 실제 소속 데이터가 raw pull에 없어 UI만 구현한다(필터링에 연결되지 않음).
+// "소속" 선택지 — 실제로는 로그인한 사용자가 센터상담사 권한(manager → manager_permission → permission →
+// permission_scope_mapping → permission_scope 체인)을 가졌을 때만 노출해야 하지만, 이 데모엔 로그인이
+// 없어 항상 노출한다. 선택값 자체도 raw pull에 없는 데이터라 필터링에는 연결되지 않는다.
 export const AFFILIATION_OPTIONS = ["파이낸셜", "인슈어런스", "파트너스"];
 
 function seededRand(seed) {
