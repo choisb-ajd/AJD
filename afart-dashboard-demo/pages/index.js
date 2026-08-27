@@ -60,6 +60,13 @@ function daysUntilFull(dueDateStr, todayStr) {
   return Math.round((due - today) / 86400000);
 }
 
+// "YYYY-MM-DD"에서 n일 전 날짜를 돌려준다.
+function daysAgoDate(dateStr, n) {
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
 // "YYYY-MM-DD" 기준으로 n개월 전 달의 1일을 돌려준다 (n=6, 기준일이 8월이면 3월 1일).
 function monthsAgoStart(dateStr, n) {
   const [y, m] = dateStr.slice(0, 7).split("-").map(Number);
@@ -185,6 +192,28 @@ export default function Home({
     dealerCount: agg.groupDealerCount.get(g.code)?.size || 0,
   }));
 
+  // 담당 딜러 수 — "딜러 전담 매니저"(users.manager_id) 기준. 상담을 처리한 매니저(managerName)와는
+  // 다른 축이라 상단 기간 필터와 무관하게, 전체 = 배정 여부만(체결 이력 전체), 활동 = 오늘(bounds.max)로부터
+  // 최근 60일 이내 체결(=체결일자) 실적이 있는 딜러만 센다.
+  const activeSinceDate = useMemo(() => daysAgoDate(bounds.max, 60), [bounds.max]);
+  const dealerCounts = useMemo(() => {
+    const scope = manager === "ALL" ? rows : rows.filter((r) => r.dealerManagerName === manager);
+    const total = new Set(scope.map((r) => r.dealerKey)).size;
+    const active = new Set(scope.filter((r) => r.date >= activeSinceDate).map((r) => r.dealerKey)).size;
+    return { total, active };
+  }, [rows, manager, activeSinceDate]);
+
+  const managerDealerCounts = useMemo(() => {
+    const map = new Map();
+    for (const r of rows) {
+      if (!map.has(r.dealerManagerName)) map.set(r.dealerManagerName, { total: new Set(), active: new Set() });
+      const entry = map.get(r.dealerManagerName);
+      entry.total.add(r.dealerKey);
+      if (r.date >= activeSinceDate) entry.active.add(r.dealerKey);
+    }
+    return map;
+  }, [rows, activeSinceDate]);
+
   const gift = useMemo(
     () => filterGiftRows(giftRows, { dateFrom, dateTo, manager }),
     [giftRows, dateFrom, dateTo, manager]
@@ -291,10 +320,22 @@ export default function Home({
             defaultTarget={manager === "ALL" ? COMPANY_MONTHLY_TARGET : 0}
           />
           <div className="kpi-card">
-            <div className="label">{manager === "ALL" ? "활동 딜러 수" : "담당 딜러 수"}</div>
-            <div className="value">
-              {agg.totals.dealerCount.toLocaleString("ko-KR")}
-              <span className="unit">명</span>
+            <div className="label">담당 딜러 수</div>
+            <div className="kpi-split">
+              <div className="kpi-split-row">
+                <span className="kpi-split-label">전체</span>
+                <span className="kpi-split-value">
+                  {dealerCounts.total.toLocaleString("ko-KR")}
+                  <span className="unit">명</span>
+                </span>
+              </div>
+              <div className="kpi-split-row">
+                <span className="kpi-split-label">활동(60일)</span>
+                <span className="kpi-split-value">
+                  {dealerCounts.active.toLocaleString("ko-KR")}
+                  <span className="unit">명</span>
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -416,7 +457,8 @@ export default function Home({
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
                       <span className="name">{m.managerName}</span>
                       <span style={{ fontSize: 12, color: "var(--ink-muted)" }}>
-                        담당딜러 {m.dealerCount} · {formatCount(m.count)} ·{" "}
+                        배정 {managerDealerCounts.get(m.managerName)?.total.size || 0} · 활동{" "}
+                        {managerDealerCounts.get(m.managerName)?.active.size || 0} · {formatCount(m.count)} ·{" "}
                         <b style={{ color: "var(--accent-ink)", fontSize: 13 }}>{formatWon(m.premiumSum)}</b>
                       </span>
                     </div>

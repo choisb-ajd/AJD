@@ -119,6 +119,7 @@ export const CLIENT_ROW_FIELDS = [
   "prospectToCompDays",
   "compToJoinDays",
   "currentStatus",
+  "dealerManagerName",
 ];
 
 export function toClientRows(rawRows) {
@@ -140,6 +141,7 @@ export function toClientRows(rawRows) {
         f.prospectToCompDays,
         f.compToJoinDays,
         r.currentStatus,
+        r.dealerManagerName || "미배정",
       ];
     });
 }
