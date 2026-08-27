@@ -337,6 +337,7 @@ export default function Home({
             monthKey={bounds.max.slice(0, 7)}
             premiumSum={curCompareAgg.totals.premiumSum}
             defaultTarget={manager === "ALL" ? COMPANY_MONTHLY_TARGET : 0}
+            isAdmin={manager === "ALL"}
           />
           <div className="kpi-card">
             <div className="label">담당 딜러 수</div>
