@@ -5,30 +5,27 @@
 
 WITH DEALER_CONTRACTS AS (
     SELECT CA.USER_ID,
-           COUNT(*) AS 누적계약건수,
-           SUM(CV.CONTRACT_AMOUNT) AS 누적원수보험료,
+           COUNT(*) AS "누적계약건수",
+           SUM(CV.CONTRACT_AMOUNT) AS "누적원수보험료",
            MIN(CASE WHEN LG.PENDING_AT IS NOT NULL THEN LG.PENDING_AT
-                    ELSE CA.JOIN_COMPLETED_AT END) AS 최초계약인입일,
+                    ELSE CA.JOIN_COMPLETED_AT END) AS "최초계약인입일",
            MAX(CASE WHEN LG.PENDING_AT IS NOT NULL THEN LG.PENDING_AT
-                    ELSE CA.JOIN_COMPLETED_AT END) AS 최종계약인입일,
-           -- 직전 60일 계약건수
+                    ELSE CA.JOIN_COMPLETED_AT END) AS "최종계약인입일",
            COUNT(CASE WHEN (CASE WHEN LG.PENDING_AT IS NOT NULL THEN LG.PENDING_AT
                                  ELSE CA.JOIN_COMPLETED_AT END)::DATE
-                           >= CURRENT_DATE - 60 THEN 1 END) AS 직전60일건수,
-           -- 직전 90일 계약건수
+                           >= CURRENT_DATE - 60 THEN 1 END) AS "직전60일건수",
            COUNT(CASE WHEN (CASE WHEN LG.PENDING_AT IS NOT NULL THEN LG.PENDING_AT
                                  ELSE CA.JOIN_COMPLETED_AT END)::DATE
-                           >= CURRENT_DATE - 90 THEN 1 END) AS 직전90일건수,
-           -- 당월 실적
+                           >= CURRENT_DATE - 90 THEN 1 END) AS "직전90일건수",
            COUNT(CASE WHEN DATE_TRUNC('MONTH',
                       CASE WHEN LG.PENDING_AT IS NOT NULL THEN LG.PENDING_AT
                            ELSE CA.JOIN_COMPLETED_AT END)
-                      = DATE_TRUNC('MONTH', CURRENT_DATE) THEN 1 END) AS 당월실적,
+                      = DATE_TRUNC('MONTH', CURRENT_DATE) THEN 1 END) AS "당월실적",
            SUM(CASE WHEN DATE_TRUNC('MONTH',
                     CASE WHEN LG.PENDING_AT IS NOT NULL THEN LG.PENDING_AT
                          ELSE CA.JOIN_COMPLETED_AT END)
                     = DATE_TRUNC('MONTH', CURRENT_DATE)
-                    THEN CV.CONTRACT_AMOUNT ELSE 0 END) AS 당월원수보험료
+                    THEN CV.CONTRACT_AMOUNT ELSE 0 END) AS "당월원수보험료"
     FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION CA
     JOIN AJDCAR_PROD.PUBLIC.CUSTOMER C
          ON C.CUSTOMER_ID = CA.CUSTOMER_ID AND C.IS_DELETED = FALSE
@@ -57,19 +54,17 @@ SELECT
     u.SECONDARY_AFFILIATION AS "지점명",
     u.AD_POINT AS "광고비포인트잔액",
 
-    -- 계약 실적
-    COALESCE(dc.누적계약건수, 0) AS "누적계약체결건수",
-    COALESCE(dc.누적원수보험료, 0) AS "누적총원수보험료",
-    dc.최초계약인입일::DATE AS "최초계약인입일",
-    dc.최종계약인입일::DATE AS "최종계약인입일",
-    COALESCE(dc.직전60일건수, 0) AS "직전60일계약체결건수",
-    COALESCE(dc.직전90일건수, 0) AS "직전90일계약체결건수",
-    COALESCE(dc.당월실적, 0) AS "당월실적",
-    COALESCE(dc.당월원수보험료, 0) AS "당월원수보험료",
+    COALESCE(dc."누적계약건수", 0) AS "누적계약체결건수",
+    COALESCE(dc."누적원수보험료", 0) AS "누적총원수보험료",
+    dc."최초계약인입일"::DATE AS "최초계약인입일",
+    dc."최종계약인입일"::DATE AS "최종계약인입일",
+    COALESCE(dc."직전60일건수", 0) AS "직전60일계약체결건수",
+    COALESCE(dc."직전90일건수", 0) AS "직전90일계약체결건수",
+    COALESCE(dc."당월실적", 0) AS "당월실적",
+    COALESCE(dc."당월원수보험료", 0) AS "당월원수보험료",
 
-    -- 활동 여부
-    CASE WHEN COALESCE(dc.직전60일건수, 0) > 0 THEN 'Y' ELSE 'N' END AS "활동회원여부(직전60일)",
-    CASE WHEN COALESCE(dc.직전90일건수, 0) > 0 THEN 'Y' ELSE 'N' END AS "활동회원여부(직전90일)"
+    CASE WHEN COALESCE(dc."직전60일건수", 0) > 0 THEN 'Y' ELSE 'N' END AS "활동회원여부(직전60일)",
+    CASE WHEN COALESCE(dc."직전90일건수", 0) > 0 THEN 'Y' ELSE 'N' END AS "활동회원여부(직전90일)"
 
 FROM AJDCAR_PROD.PUBLIC.USERS u
 LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER m
