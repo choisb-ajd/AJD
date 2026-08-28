@@ -264,6 +264,7 @@ export default function Home({
     <>
       <Head>
         <title>다이렉트 대시보드 for AFART</title>
+        <meta name="robots" content="noindex, nofollow, noarchive" />
       </Head>
 
       <div className="topbar">
