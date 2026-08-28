@@ -18,7 +18,12 @@
 --   - "가입유형" = counsel_application.subscription_type (원본 값 그대로 사용)
 --   - "가입보험사" = counsel_application.join_insurer_code를 한글명으로 CASE 매핑
 --   - "체결일자" = 현재 상태가 지급대기(ACCUMULATE_PENDING)면 상태이력에서 최초로
---     그 상태에 도달한 시각, 가입완료(JOIN_COMPLETED)면 counsel_application.join_completed_at
+--     그 상태에 도달한 시각, 가입완료(JOIN_COMPLETED)면 counsel_application.join_completed_at,
+--     가입취소(JOIN_CANCELLED)면 join_completed_at(성사 이력 없이 취소된 건은 NULL)
+--
+-- 대시보드 "가입취소 리스트"용으로 counsel_status = 'JOIN_CANCELLED'인 건도 함께 내려받습니다.
+-- 체결(지급대기·가입완료) 집계에는 이 건들이 섞이지 않는데, 대시보드가 "체결일자"가 비어있는
+-- 행은 체결 관련 집계(KPI·기간별 실적·매니저 랭킹)에서 자동으로 제외하기 때문입니다.
 -- ============================================================================
 
 WITH status_agg AS (
@@ -71,7 +76,8 @@ masked AS (
   JOIN AJDCAR_PROD.PUBLIC.CUSTOMER cu        ON cu.customer_id = ca.customer_id AND cu.is_deleted = FALSE
   LEFT JOIN AJDCAR_PROD.PUBLIC.USERS u        ON u.id = ca.user_id
   WHERE ca.is_deleted = FALSE
-    AND ca.counsel_status IN ('ACCUMULATE_PENDING', 'JOIN_COMPLETED')   -- 체결 = 지급대기 + 가입완료
+    AND ca.counsel_status IN ('ACCUMULATE_PENDING', 'JOIN_COMPLETED', 'JOIN_CANCELLED')
+    -- 지급대기 + 가입완료(체결) + 가입취소(가입취소 리스트용). 체결 집계에는 가입취소 건이 안 섞입니다.
     AND (u.business_card_status IS NULL OR u.business_card_status <> 'REJECTED')  -- 탈퇴 딜러 제외
     -- 기간을 좁히고 싶으면 아래 주석 해제 (예: 최근 6개월)
     -- AND ca.created_at >= DATEADD('month', -6, CURRENT_DATE())
@@ -142,4 +148,4 @@ LEFT JOIN AJDCAR_PROD.PUBLIC.GIFT g           ON g.gift_id = m.gift_id
 LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER cm       ON cm.id = m.counsel_manager_id
 LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER dm       ON dm.id = m.dealer_manager_id
 ORDER BY
-  CASE WHEN m.counsel_status = 'ACCUMULATE_PENDING' THEN sa.pending_at ELSE m.join_completed_at END DESC;
+  CASE WHEN m.counsel_status = 'ACCUMULATE_PENDING' THEN sa.pending_at ELSE m.join_completed_at END DESC NULLS LAST;

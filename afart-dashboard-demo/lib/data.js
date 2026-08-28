@@ -188,9 +188,12 @@ export function toCancelledRows(rawRows) {
     .map((r) => {
       const events = parseHistory(r.statusHistory);
       const cancelled = [...events].reverse().find((e) => e.status === "JOIN_CANCELLED");
+      // 체결까지 못 가고 취소된 건은 체결일자(contractDate)가 비어있을 수 있어, 상단 날짜
+      // 필터에 걸리는 기준일은 항상 가입취소일시로 삼는다 (date/cancelledAt 동일 값).
+      const cancelledAt = cancelled ? `2026-${cancelled.at.replace(" ", " ")}` : r.contractDate;
       return {
-        date: r.contractDate,
-        cancelledAt: cancelled ? `2026-${cancelled.at.replace(" ", " ")}` : r.contractDate,
+        date: cancelledAt,
+        cancelledAt,
         customerName: r.customerName || "",
         phone: r.phone || "",
         managerName: r.managerName || "미배정",
