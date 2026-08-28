@@ -179,24 +179,23 @@ export function toPendingRows(rawRows) {
     });
 }
 
-// '가입취소' 이력 리스트 — 이 raw pull은 최종 성사 건만 담고 있어 "현재" 가입취소 상태인 건은 없다.
-// 대신 이력상 가입취소를 겪었다가 재가입으로 마무리된 건을 보여준다.
-export function toCancelledHistoryRows(rawRows) {
+// '가입취소' 리스트 — 현재상태가 실제로 가입취소(JOIN_CANCELLED)인 건만 보여준다.
+// 이 raw pull은 counsel_status IN (ACCUMULATE_PENDING, JOIN_COMPLETED)인 최종 성사 건만
+// 담고 있어 실제로는 항상 비어 보인다 — 실 서비스 데이터가 붙으면 정상적으로 채워진다.
+export function toCancelledRows(rawRows) {
   return rawRows
-    .filter((r) => /JOIN_CANCELLED/.test(r.statusHistory || "") && isEligibleDealer(r))
+    .filter((r) => r.currentStatus === "JOIN_CANCELLED" && isEligibleDealer(r))
     .map((r) => {
       const events = parseHistory(r.statusHistory);
-      const cancelled = events.find((e) => e.status === "JOIN_CANCELLED");
-      const after = events[events.length - 1];
+      const cancelled = [...events].reverse().find((e) => e.status === "JOIN_CANCELLED");
       return {
         date: r.contractDate,
-        cancelledAt: cancelled ? `2026-${cancelled.at.replace(" ", " ")}` : "",
-        recoveredAt: after ? `2026-${after.at.replace(" ", " ")}` : "",
+        cancelledAt: cancelled ? `2026-${cancelled.at.replace(" ", " ")}` : r.contractDate,
         customerName: r.customerName || "",
         phone: r.phone || "",
-        premium: r.premium,
         managerName: r.managerName || "미배정",
-        finalStatus: r.currentStatus,
+        dealerName: r.dealerName || "미상",
+        dealerManagerName: r.dealerManagerName || "미배정",
       };
     });
 }

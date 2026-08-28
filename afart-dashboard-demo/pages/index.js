@@ -5,7 +5,7 @@ import {
   toClientRows,
   toGiftRows,
   toPendingRows,
-  toCancelledHistoryRows,
+  toCancelledRows,
   toRenewalRows,
 } from "../lib/data";
 import { unpackRows } from "../lib/pack";
@@ -35,7 +35,7 @@ export async function getStaticProps() {
   const packedRows = toClientRows(raw);
   const giftRows = toGiftRows(raw);
   const pendingRows = toPendingRows(raw);
-  const cancelledRows = toCancelledHistoryRows(raw);
+  const cancelledRows = toCancelledRows(raw);
   const renewalRows = toRenewalRows(raw);
   const dateMin = packedRows.reduce((m, r) => (m === "" || r[0] < m ? r[0] : m), "");
   const dateMax = packedRows.reduce((m, r) => (m === "" || r[0] > m ? r[0] : m), "");
@@ -815,11 +815,11 @@ export default function Home({
 
           <section className="section">
             <div className="section-head">
-              <h2>'가입취소' 이력이 있는 건</h2>
+              <h2>가입취소 리스트</h2>
             </div>
             <p className="section-note">
-              이 raw pull은 최종 성사 건만 담고 있어 현재 가입취소 상태인 건은 없습니다. 대신 이력상 가입취소 후 재가입으로 마무리된
-              실제 사례입니다.
+              현재 상태가 실제로 가입취소(JOIN_CANCELLED)인 상담 건만 보여줍니다. 이 raw pull은 지급대기·가입완료로 끝난 최종 성사
+              건만 담고 있어 해당 건이 없어 항상 비어 보입니다 — 실 서비스 데이터가 붙으면 정상적으로 채워집니다.
             </p>
             <div className="table-wrap">
               <table className="data">
@@ -828,15 +828,15 @@ export default function Home({
                     <th>가입취소일시</th>
                     <th>고객명</th>
                     <th>연락처</th>
-                    <th>재가입일시</th>
                     <th>매니저</th>
+                    <th>딜러(회원)</th>
                   </tr>
                 </thead>
                 <tbody>
                   {cancelled.length === 0 && (
                     <tr>
                       <td colSpan={5} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
-                        해당 조건에 가입취소 이력이 없습니다.
+                        해당 조건에 가입취소 건이 없습니다.
                       </td>
                     </tr>
                   )}
@@ -845,8 +845,10 @@ export default function Home({
                       <td>{r.cancelledAt}</td>
                       <td style={{ textAlign: "left" }}>{r.customerName}</td>
                       <td>{r.phone}</td>
-                      <td>{r.recoveredAt}</td>
                       <td>{r.managerName}</td>
+                      <td style={{ textAlign: "left" }}>
+                        {r.dealerName} · {r.dealerManagerName}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
