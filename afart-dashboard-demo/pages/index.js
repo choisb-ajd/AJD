@@ -486,6 +486,57 @@ export default function Home({
 
         <section className="section">
           <div className="section-head">
+            <h2>가입취소 리스트</h2>
+          </div>
+          <p className="section-note">
+            현재 상태가 실제로 가입취소(JOIN_CANCELLED)인 상담 건만 보여줍니다. 이 raw pull은 지급대기·가입완료로 끝난 최종 성사
+            건만 담고 있어 해당 건이 없어 항상 비어 보입니다 — 실 서비스 데이터가 붙으면 정상적으로 채워집니다.
+          </p>
+          <div className="table-wrap">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>가입취소일시</th>
+                  <th>고객명</th>
+                  <th>연락처</th>
+                  <th>체결일</th>
+                  <th>가입보험사</th>
+                  <th>가입유형</th>
+                  <th>보험료</th>
+                  <th>매니저</th>
+                  <th>딜러(회원)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cancelled.length === 0 && (
+                  <tr>
+                    <td colSpan={9} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                      해당 조건에 가입취소 건이 없습니다.
+                    </td>
+                  </tr>
+                )}
+                {cancelled.map((r, i) => (
+                  <tr key={i}>
+                    <td>{r.cancelledAt}</td>
+                    <td style={{ textAlign: "left" }}>{r.customerName}</td>
+                    <td>{r.phone}</td>
+                    <td>{r.contractDate || "-"}</td>
+                    <td>{r.insurer}</td>
+                    <td>{r.joinType}</td>
+                    <td>{formatWon(r.premium)}</td>
+                    <td>{r.managerName}</td>
+                    <td style={{ textAlign: "left" }}>
+                      {r.dealerName} · {r.dealerManagerName}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="section">
+          <div className="section-head">
             <h2>매니저별 실적 랭킹</h2>
           </div>
           <p className="section-note">
@@ -771,91 +822,46 @@ export default function Home({
           </div>
         </section>
 
-        <div className="grid-2">
-          <section className="section">
-            <div className="section-head">
-              <h2>'지급대기' 전환 고객 리스트</h2>
-            </div>
-            <p className="section-note">
-              현재상태 = ACCUMULATE_PENDING 실제 데이터입니다.
-              {pending.length > 30 && ` 최근 30건만 표시하고 스크롤됩니다 (전체 ${formatCount(pending.length)}).`}
-            </p>
-            <div className="table-wrap table-scroll">
-              <table className="data">
-                <thead>
+        <section className="section">
+          <div className="section-head">
+            <h2>'지급대기' 전환 고객 리스트</h2>
+          </div>
+          <p className="section-note">
+            현재상태 = ACCUMULATE_PENDING 실제 데이터입니다.
+            {pending.length > 30 && ` 최근 30건만 표시하고 스크롤됩니다 (전체 ${formatCount(pending.length)}).`}
+          </p>
+          <div className="table-wrap table-scroll">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>전환일시</th>
+                  <th>고객명</th>
+                  <th>연락처</th>
+                  <th>보험료</th>
+                  <th>매니저</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingShown.length === 0 && (
                   <tr>
-                    <th>전환일시</th>
-                    <th>고객명</th>
-                    <th>연락처</th>
-                    <th>보험료</th>
-                    <th>매니저</th>
+                    <td colSpan={5} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                      해당 조건에 지급대기 건이 없습니다.
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {pendingShown.length === 0 && (
-                    <tr>
-                      <td colSpan={5} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
-                        해당 조건에 지급대기 건이 없습니다.
-                      </td>
-                    </tr>
-                  )}
-                  {pendingShown.map((r, i) => (
-                    <tr key={i}>
-                      <td>{r.transitionAt}</td>
-                      <td style={{ textAlign: "left" }}>{r.customerName}</td>
-                      <td>{r.phone}</td>
-                      <td>{formatWon(r.premium)}</td>
-                      <td>{r.managerName}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section className="section">
-            <div className="section-head">
-              <h2>가입취소 리스트</h2>
-            </div>
-            <p className="section-note">
-              현재 상태가 실제로 가입취소(JOIN_CANCELLED)인 상담 건만 보여줍니다. 이 raw pull은 지급대기·가입완료로 끝난 최종 성사
-              건만 담고 있어 해당 건이 없어 항상 비어 보입니다 — 실 서비스 데이터가 붙으면 정상적으로 채워집니다.
-            </p>
-            <div className="table-wrap">
-              <table className="data">
-                <thead>
-                  <tr>
-                    <th>가입취소일시</th>
-                    <th>고객명</th>
-                    <th>연락처</th>
-                    <th>매니저</th>
-                    <th>딜러(회원)</th>
+                )}
+                {pendingShown.map((r, i) => (
+                  <tr key={i}>
+                    <td>{r.transitionAt}</td>
+                    <td style={{ textAlign: "left" }}>{r.customerName}</td>
+                    <td>{r.phone}</td>
+                    <td>{formatWon(r.premium)}</td>
+                    <td>{r.managerName}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {cancelled.length === 0 && (
-                    <tr>
-                      <td colSpan={5} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
-                        해당 조건에 가입취소 건이 없습니다.
-                      </td>
-                    </tr>
-                  )}
-                  {cancelled.map((r, i) => (
-                    <tr key={i}>
-                      <td>{r.cancelledAt}</td>
-                      <td style={{ textAlign: "left" }}>{r.customerName}</td>
-                      <td>{r.phone}</td>
-                      <td>{r.managerName}</td>
-                      <td style={{ textAlign: "left" }}>
-                        {r.dealerName} · {r.dealerManagerName}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
 
         <section className="section">
           <div className="section-head">
