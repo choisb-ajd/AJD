@@ -489,8 +489,7 @@ export default function Home({
             <h2>가입취소 리스트</h2>
           </div>
           <p className="section-note">
-            현재 상태가 실제로 가입취소(JOIN_CANCELLED)인 상담 건만 보여줍니다. 이 raw pull은 지급대기·가입완료로 끝난 최종 성사
-            건만 담고 있어 해당 건이 없어 항상 비어 보입니다 — 실 서비스 데이터가 붙으면 정상적으로 채워집니다.
+            현재 상태가 실제로 가입취소(JOIN_CANCELLED)인 상담 건만 보여줍니다.
           </p>
           <div className="table-wrap">
             <table className="data">
