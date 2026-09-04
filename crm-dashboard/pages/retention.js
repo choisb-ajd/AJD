@@ -320,6 +320,7 @@ export default function RetentionPage({ role, name }) {
       {selectedRow && (
         <RetentionPanel
           row={selectedRow}
+          isAdmin={isAdmin}
           focusNote={focusNote}
           onClose={() => setSelectedRow(null)}
           onNoteUpdated={(updates) => handleRowNoteUpdated(selectedRow.phone, updates)}
@@ -333,7 +334,7 @@ export default function RetentionPage({ role, name }) {
   );
 }
 
-function RetentionPanel({ row, focusNote, onClose, onNoteUpdated }) {
+function RetentionPanel({ row, isAdmin, focusNote, onClose, onNoteUpdated }) {
   useEscapeKey(onClose);
   const ret = calcRetention(row);
   const activeTypes = (['type1', 'type2', 'type3', 'type4']).filter((t) => ret[t]);
@@ -369,6 +370,13 @@ function RetentionPanel({ row, focusNote, onClose, onNoteUpdated }) {
         <InfoRow label="직전60일" value={row.last60dContracts || '0'} />
       </div>
 
+      {/* 관리자 메모 */}
+      <AdminNoteSection
+        row={row}
+        isAdmin={isAdmin}
+        onUpdated={onNoteUpdated}
+      />
+
       {/* 컨택 히스토리 */}
       <div className="detail-panel-history" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <ContactHistoryPanel
@@ -377,6 +385,82 @@ function RetentionPanel({ row, focusNote, onClose, onNoteUpdated }) {
           onUpdated={onNoteUpdated}
         />
       </div>
+    </div>
+  );
+}
+
+function AdminNoteSection({ row, isAdmin, onUpdated }) {
+  const [value, setValue] = useState(row.adminNote || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setValue(row.adminNote || '');
+    setError('');
+    setSaved(false);
+  }, [row.phone]);
+
+  if (!isAdmin && !row.adminNote) return null;
+
+  async function handleSave() {
+    setSaving(true);
+    setError('');
+    setSaved(false);
+    try {
+      const res = await fetch('/api/members/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: row.phone, updates: { adminNote: value } }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || '저장 실패'); setSaving(false); return; }
+      setSaved(true);
+      if (onUpdated) onUpdated({ adminNote: value });
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      setError('네트워크 오류가 발생했습니다.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{
+      margin: '0 16px 0', padding: '10px 12px',
+      background: isAdmin ? '#FFFBEB' : '#FFFBEB',
+      border: '1px solid #FDE68A', borderRadius: 8,
+      marginTop: 10, marginBottom: 2,
+    }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: '#92400E', marginBottom: 6 }}>📌 관리자 메모</div>
+      {isAdmin ? (
+        <>
+          <textarea
+            value={value}
+            onChange={(e) => { setValue(e.target.value); setSaved(false); }}
+            placeholder="날짜 기준 안내나 특이사항 입력 (매니저에게 노출됩니다)"
+            maxLength={500}
+            style={{
+              width: '100%', minHeight: 64, resize: 'vertical', fontSize: 13,
+              border: '1px solid #FDE68A', borderRadius: 6, padding: '6px 8px',
+              background: '#FFFEF7', boxSizing: 'border-box',
+            }}
+          />
+          {error && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 4 }}>{error}</div>}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 6 }}>
+            <span style={{ fontSize: 12, color: saved ? '#16A34A' : 'var(--muted)', alignSelf: 'center' }}>
+              {saved ? '저장됨' : `${value.length}/500자`}
+            </span>
+            <button className="btn btn-primary" disabled={saving} onClick={handleSave} style={{ fontSize: 12, padding: '3px 12px' }}>
+              {saving ? '저장 중...' : '저장'}
+            </button>
+          </div>
+        </>
+      ) : (
+        <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', color: '#78350F', lineHeight: 1.6 }}>
+          {row.adminNote}
+        </div>
+      )}
     </div>
   );
 }
