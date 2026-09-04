@@ -171,6 +171,7 @@ export default function RefSheetPage({ role, name, sheetKey, sheetLabel, sheetUr
                   {s.label}
                 </Link>
               ))}
+              <Link className="topbar-nav-link" href="/retention">리텐션대상자</Link>
               {!isAdmin && <Link className="topbar-nav-link" href="/performance">실적현황</Link>}
               {isAdmin && <Link className="topbar-nav-link" href="/accounts">계정관리</Link>}
             </nav>

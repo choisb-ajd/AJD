@@ -598,6 +598,7 @@ export default function DashboardPage({ role, name, adminSheetUrl }) {
               {REF_SHEETS.filter((s) => !s.hiddenFromNav).map((s) => (
                 <Link key={s.key} className="topbar-nav-link" href={`/sheet/${s.key}`}>{s.label}</Link>
               ))}
+              <Link className="topbar-nav-link" href="/retention">리텐션대상자</Link>
               {!isAdmin && <Link className="topbar-nav-link" href="/performance">실적현황</Link>}
               {isAdmin && <Link className="topbar-nav-link" href="/accounts">계정관리</Link>}
             </nav>

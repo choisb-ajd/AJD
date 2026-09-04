@@ -70,6 +70,7 @@ export default function AccountsPage({ role, name }) {
               {REF_SHEETS.filter((s) => !s.hiddenFromNav).map((s) => (
                 <Link key={s.key} className="topbar-nav-link" href={`/sheet/${s.key}`}>{s.label}</Link>
               ))}
+              <Link className="topbar-nav-link" href="/retention">리텐션대상자</Link>
               <Link className="topbar-nav-link active" href="/accounts">계정관리</Link>
             </nav>
           </div>

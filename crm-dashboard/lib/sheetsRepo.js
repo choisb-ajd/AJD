@@ -58,6 +58,8 @@ let performanceCache = null; // { expires, data }
 let adminResultCache = null;     // { expires, sheetTitle, columnMap, rows, etag }
 let adminRebuildInFlight = null; // 동시 재빌드 중복 방지용 Promise
 
+let kamasterCache = null; // { expires, loginStatusMap: Map<phone, hasLoginId> }
+
 const PERFORMANCE_SHEET_TITLE = '관리_컨택 대시보드';
 
 function quoteSheetTitle(title) {
@@ -1288,6 +1290,57 @@ async function backfillRegisteredAt() {
   return { adminFixed: data.length };
 }
 
+// 카마스터 시트에서 연락처별 로그인ID 유무를 읽어 반환합니다.
+// 로그인ID가 공백인 회원 = 준회원.
+async function readKamasterLoginStatus({ useCache = true } = {}) {
+  if (useCache && kamasterCache && kamasterCache.expires > Date.now()) {
+    return kamasterCache.loginStatusMap;
+  }
+
+  const sheets = getSheetsClient();
+
+  // '카마스터' 문자열을 포함하는 탭을 자동 탐색
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId: ADMIN_SPREADSHEET_ID,
+    fields: 'sheets.properties.title',
+  });
+  const titles = (meta.data.sheets || []).map((s) => s.properties.title);
+  const sheetTitle = titles.find((t) => t.includes('카마스터'));
+  if (!sheetTitle) {
+    console.warn('카마스터 탭을 찾지 못했습니다. 탭 목록:', titles);
+    kamasterCache = { expires: Date.now() + CACHE_TTL_MS, loginStatusMap: new Map() };
+    return kamasterCache.loginStatusMap;
+  }
+
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: ADMIN_SPREADSHEET_ID,
+    range: `${quoteSheetTitle(sheetTitle)}!A1:AZ`,
+  });
+  const allRows = res.data.values || [];
+  const loginStatusMap = new Map(); // normalizedPhone → hasLoginId (bool)
+
+  if (allRows.length < 2) {
+    kamasterCache = { expires: Date.now() + CACHE_TTL_MS, loginStatusMap };
+    return loginStatusMap;
+  }
+
+  const header = allRows[0].map((h) => (h || '').toString().trim());
+  const phoneIdx = header.findIndex((h) => ['연락처', '전화번호', '핸드폰번호', '휴대폰'].includes(h));
+  const loginIdx = header.findIndex((h) => h.includes('로그인'));
+
+  for (let i = 1; i < allRows.length; i++) {
+    const row = allRows[i];
+    if (phoneIdx < 0) continue;
+    const phone = normalizePhone(row[phoneIdx] || '');
+    if (!phone) continue;
+    const loginId = loginIdx >= 0 ? (row[loginIdx] || '').toString().trim() : '';
+    loginStatusMap.set(phone, !!loginId); // true = 정회원, false = 준회원
+  }
+
+  kamasterCache = { expires: Date.now() + CACHE_TTL_MS, loginStatusMap };
+  return loginStatusMap;
+}
+
 module.exports = {
   ADMIN_SPREADSHEET_ID,
   MAX_FAILED_ATTEMPTS,
@@ -1334,4 +1387,5 @@ module.exports = {
   saveAnnouncement,
   readPerformanceDashboard,
   backfillRegisteredAt,
+  readKamasterLoginStatus,
 };
