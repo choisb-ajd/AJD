@@ -87,6 +87,17 @@ export default function RetentionPage({ role, name }) {
   const [changingPassword, setChangingPassword] = useState(false);
   const [selectedRow, setSelectedRow] = useState(null);
   const [focusNote, setFocusNote] = useState(false);
+  const topbarRef = useRef(null);
+
+  useEffect(() => {
+    const el = topbarRef.current;
+    if (!el) return;
+    const update = () => document.documentElement.style.setProperty('--topbar-h', el.offsetHeight + 'px');
+    update();
+    const obs = new ResizeObserver(update);
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -151,7 +162,7 @@ export default function RetentionPage({ role, name }) {
   return (
     <div className="app-shell">
       <FaqWidget isAdmin={isAdmin} />
-      <div className="topbar">
+      <div className="topbar" ref={topbarRef}>
         <div className="topbar-main">
           <div className="topbar-left">
             <span className="topbar-title">My Dealer</span>
@@ -464,7 +475,9 @@ function ContactHistoryPanel({ row, focusNote, onUpdated }) {
             <div className="history-note" key={i}>
               <div className="history-note-meta">
                 {n.author && <span className="history-note-author">{n.author}</span>}
-                {n.timestamp && <span className="history-note-time">{formatRelativeTime(n.timestamp)}</span>}
+                <span className="history-note-time">
+                  {n.timestamp ? formatRelativeTime(n.timestamp) : '시간 미기록'}
+                </span>
               </div>
               <div className="history-note-text">{n.text}</div>
             </div>
