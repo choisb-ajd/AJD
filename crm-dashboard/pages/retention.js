@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import cookie from 'cookie';
 import { verifySession, COOKIE_NAME } from '../lib/auth';
-import { REF_SHEETS, formatDateDisplay } from '../lib/sheetSchema';
+import { REF_SHEETS, formatDateDisplay, parseContactHistory } from '../lib/sheetSchema';
 import ChangePasswordModal from '../components/ChangePasswordModal';
 import Announcement from '../components/Announcement';
 import FaqWidget from '../components/FaqWidget';
+import useEscapeKey from '../lib/useEscapeKey';
 import { fetchAndCache } from '../lib/dataCache';
 
 export async function getServerSideProps({ req }) {
@@ -31,43 +32,25 @@ function daysSince(str) {
   return Math.floor((Date.now() - d.getTime()) / 86400000);
 }
 
-// 리텐션 유형 판단
-// 유형4의 '준회원' 기준: group 또는 brand 필드에 '준회원' 포함 여부.
-// 실제 저장 필드가 다르면 아래 isAssocMember 로직을 수정하세요.
 function calcRetention(row) {
   const total = parseInt(row.totalContracts, 10) || 0;
   const last60 = parseInt(row.last60dContracts, 10) || 0;
-
   const joinDateStr = row.appJoinDate || row.registeredAt || '';
   const age = daysSince(joinDateStr);
-
   const isAssocMember = !!row.isAssocMember;
-
   const type1 = total === 1 && last60 === 0;
   const type2 = total >= 2 && last60 === 0;
   const type3 = total === 0 && age !== null && age >= 60;
   const type4 = isAssocMember && total >= 1 && last60 === 0;
-
   return { type1, type2, type3, type4, isTarget: type1 || type2 || type3 || type4 };
 }
 
-const TYPE_LABELS = {
-  type1: '유형1',
-  type2: '유형2',
-  type3: '유형3',
-  type4: '유형4',
-};
+const TYPE_LABELS = { type1: '유형1', type2: '유형2', type3: '유형3', type4: '유형4' };
 const TYPE_DESCS = {
   type1: '누적계약 1건, 직전60일 0건',
   type2: '누적계약 2건↑, 직전60일 0건',
   type3: '계약 0건 + 가입 60일↑',
   type4: '준회원, 누적1건↑, 직전60일 0건',
-};
-const TYPE_COLORS = {
-  type1: { bg: '#FEF9C3', text: '#854D0E', border: '#FDE68A' },
-  type2: '#FEF2F2',
-  type3: '#F0FDF4',
-  type4: '#EFF6FF',
 };
 const TYPE_TAG_STYLE = {
   type1: { background: '#FEF9C3', color: '#854D0E', border: '1px solid #FDE68A' },
@@ -78,6 +61,21 @@ const TYPE_TAG_STYLE = {
 
 const RETENTION_KEY = 'retention-v1';
 
+function formatRelativeTime(timestamp) {
+  if (!timestamp) return '';
+  const ts = Date.parse(timestamp.replace(' ', 'T'));
+  if (!ts) return timestamp;
+  const diffMs = Date.now() - ts;
+  const min = Math.floor(diffMs / 60000);
+  if (min < 1) return '방금 전';
+  if (min < 60) return `${min}분 전`;
+  const hour = Math.floor(min / 60);
+  if (hour < 24) return `${hour}시간 전`;
+  const day = Math.floor(hour / 24);
+  if (day < 7) return `${day}일 전`;
+  return timestamp.slice(0, 10);
+}
+
 export default function RetentionPage({ role, name }) {
   const isAdmin = role === '관리자';
 
@@ -87,6 +85,8 @@ export default function RetentionPage({ role, name }) {
   const [typeFilter, setTypeFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
+  const [selectedRow, setSelectedRow] = useState(null);
+  const [focusNote, setFocusNote] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -107,20 +107,24 @@ export default function RetentionPage({ role, name }) {
     window.location.href = '/login';
   }
 
-  // 리텐션 계산 결과를 row에 붙임
+  function handleRowNoteUpdated(phone, updates) {
+    setRows((prev) => prev.map((r) => r.phone === phone ? { ...r, ...updates } : r));
+    setSelectedRow((prev) => prev && prev.phone === phone ? { ...prev, ...updates } : prev);
+  }
+
+  function openPanel(row, withFocus = false) {
+    setSelectedRow(row);
+    setFocusNote(withFocus);
+  }
+
   const enriched = useMemo(() =>
     rows.map((r) => ({ ...r, _ret: calcRetention(r) })),
     [rows]
   );
 
-  // 대상자 필터링
   const targets = useMemo(() => {
     let list = enriched.filter((r) => r._ret.isTarget);
-
-    if (typeFilter !== 'all') {
-      list = list.filter((r) => r._ret[typeFilter]);
-    }
-
+    if (typeFilter !== 'all') list = list.filter((r) => r._ret[typeFilter]);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter((r) =>
@@ -130,11 +134,9 @@ export default function RetentionPage({ role, name }) {
         (r.branch || '').toLowerCase().includes(q)
       );
     }
-
     return list;
   }, [enriched, typeFilter, search]);
 
-  // 유형별 카운트
   const counts = useMemo(() => {
     const base = enriched.filter((r) => r._ret.isTarget);
     return {
@@ -173,7 +175,7 @@ export default function RetentionPage({ role, name }) {
         <Announcement isAdmin={isAdmin} />
       </div>
 
-      <div className="page-body">
+      <div className={`page-body${selectedRow ? ' panel-open' : ''}`}>
         <div className="page-heading">
           <div>
             <h1>리텐션 대상자</h1>
@@ -186,7 +188,7 @@ export default function RetentionPage({ role, name }) {
           {(['type1', 'type2', 'type3', 'type4']).map((t) => (
             <div key={t} style={{
               padding: '8px 14px', borderRadius: 8, fontSize: 12, lineHeight: 1.5,
-              border: `1px solid ${TYPE_TAG_STYLE[t].border}`,
+              border: TYPE_TAG_STYLE[t].border,
               background: TYPE_TAG_STYLE[t].background,
               color: TYPE_TAG_STYLE[t].color,
             }}>
@@ -246,24 +248,35 @@ export default function RetentionPage({ role, name }) {
                   <th style={{ minWidth: 52, textAlign: 'center' }}>유형2</th>
                   <th style={{ minWidth: 52, textAlign: 'center' }}>유형3</th>
                   <th style={{ minWidth: 52, textAlign: 'center' }}>유형4</th>
+                  <th style={{ minWidth: 120 }}>최근 메모</th>
                 </tr>
               </thead>
               <tbody>
                 {targets.length === 0 && (
                   <tr>
-                    <td colSpan={13} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--muted)' }}>
+                    <td colSpan={14} style={{ textAlign: 'center', padding: '40px 0', color: 'var(--muted)' }}>
                       해당하는 리텐션 대상자가 없습니다.
                     </td>
                   </tr>
                 )}
                 {targets.map((row, i) => {
                   const ret = row._ret;
+                  const notes = parseContactHistory(row.contactHistory);
+                  const latest = notes[0];
+                  const latestText = latest ? latest.text : '';
+                  const latestAuthor = latest ? latest.author : '';
+                  const combined = latestText ? (latestAuthor ? `[${latestAuthor}] ` : '') + latestText : '';
+                  const displayText = combined.length > 40 ? combined.slice(0, 40) + '…' : combined;
+                  const isSelected = selectedRow && selectedRow.phone === row.phone;
                   return (
-                    <tr key={row.phone || i}>
+                    <tr
+                      key={row.phone || i}
+                      onClick={() => openPanel(row)}
+                      className={isSelected ? 'row-selected' : ''}
+                      style={{ cursor: 'pointer' }}
+                    >
                       <td>{row.name || '-'}</td>
-                      <td style={{ fontFamily: 'monospace', fontSize: 12 }}>
-                        {row.phone || '-'}
-                      </td>
+                      <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{row.phone || '-'}</td>
                       <td>{row.manager || '-'}</td>
                       <td>{row.group || '-'}</td>
                       <td>{row.brand || '-'}</td>
@@ -275,6 +288,18 @@ export default function RetentionPage({ role, name }) {
                       <TypeCell active={ret.type2} type="type2" />
                       <TypeCell active={ret.type3} type="type3" />
                       <TypeCell active={ret.type4} type="type4" />
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span className="history-snippet" style={{ fontSize: 12, color: displayText ? undefined : 'var(--muted)' }}>
+                            {displayText || '-'}
+                          </span>
+                          <button
+                            className="btn-add-note"
+                            title="메모 추가"
+                            onClick={(e) => { e.stopPropagation(); openPanel(row, true); }}
+                          >+</button>
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -284,6 +309,15 @@ export default function RetentionPage({ role, name }) {
         )}
       </div>
 
+      {selectedRow && (
+        <RetentionPanel
+          row={selectedRow}
+          focusNote={focusNote}
+          onClose={() => setSelectedRow(null)}
+          onNoteUpdated={(updates) => handleRowNoteUpdated(selectedRow.phone, updates)}
+        />
+      )}
+
       {changingPassword && (
         <ChangePasswordModal onClose={() => setChangingPassword(false)} />
       )}
@@ -291,20 +325,164 @@ export default function RetentionPage({ role, name }) {
   );
 }
 
+function RetentionPanel({ row, focusNote, onClose, onNoteUpdated }) {
+  useEscapeKey(onClose);
+  const ret = calcRetention(row);
+  const activeTypes = (['type1', 'type2', 'type3', 'type4']).filter((t) => ret[t]);
+
+  return (
+    <div className="detail-side-panel">
+      <div className="detail-panel-header">
+        <div>
+          <h2>{row.name || '-'}</h2>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+            {activeTypes.map((t) => (
+              <span key={t} style={{
+                display: 'inline-block', padding: '1px 8px', borderRadius: 10, fontSize: 11, fontWeight: 700,
+                border: TYPE_TAG_STYLE[t].border,
+                background: TYPE_TAG_STYLE[t].background,
+                color: TYPE_TAG_STYLE[t].color,
+              }}>{TYPE_LABELS[t]}</span>
+            ))}
+          </div>
+        </div>
+        <button className="modal-close" onClick={onClose}>&times;</button>
+      </div>
+
+      {/* 기본 정보 */}
+      <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 12px', fontSize: 13 }}>
+        <InfoRow label="연락처" value={row.phone} mono />
+        <InfoRow label="담당매니저" value={row.manager} />
+        <InfoRow label="그룹" value={row.group} />
+        <InfoRow label="브랜드" value={row.brand} />
+        <InfoRow label="지점/대리점" value={row.branch} />
+        <InfoRow label="App가입일" value={formatDateDisplay(row.appJoinDate)} />
+        <InfoRow label="누적계약" value={row.totalContracts || '0'} />
+        <InfoRow label="직전60일" value={row.last60dContracts || '0'} />
+      </div>
+
+      {/* 컨택 히스토리 */}
+      <div className="detail-panel-history" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <ContactHistoryPanel
+          row={row}
+          focusNote={focusNote}
+          onUpdated={onNoteUpdated}
+        />
+      </div>
+    </div>
+  );
+}
+
+function InfoRow({ label, value, mono }) {
+  return (
+    <div>
+      <span style={{ color: 'var(--muted)', fontSize: 11 }}>{label}</span>
+      <div style={{ fontFamily: mono ? 'monospace' : undefined, fontSize: 13 }}>{value || '-'}</div>
+    </div>
+  );
+}
+
+function ContactHistoryPanel({ row, focusNote, onUpdated }) {
+  const [contactHistory, setContactHistory] = useState(row.contactHistory || '');
+  const [noteText, setNoteText] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const textareaRef = useRef(null);
+
+  const notes = useMemo(() => parseContactHistory(contactHistory), [contactHistory]);
+
+  useEffect(() => {
+    if (focusNote && textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, [focusNote]);
+
+  // 외부에서 row가 바뀌면 (다른 row 선택 시) 히스토리 동기화
+  useEffect(() => {
+    setContactHistory(row.contactHistory || '');
+    setNoteText('');
+    setError('');
+  }, [row.phone]);
+
+  async function submitNote() {
+    const trimmed = noteText.trim();
+    if (!trimmed) return;
+    setSaving(true);
+    setError('');
+    try {
+      const res = await fetch('/api/members/add-note', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: row.phone, text: trimmed }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || '메모 저장에 실패했습니다.');
+        setSaving(false);
+        return;
+      }
+      setContactHistory(data.updates.contactHistory);
+      setNoteText('');
+      if (onUpdated) onUpdated(data.updates);
+    } catch (e) {
+      setError('네트워크 오류가 발생했습니다.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="history-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="history-section-title">컨택 히스토리</div>
+      <div className="history-add-box">
+        {error && <div className="modal-message err">{error}</div>}
+        <textarea
+          ref={textareaRef}
+          value={noteText}
+          maxLength={300}
+          placeholder="상담 내용 입력 (Ctrl+Enter 저장)"
+          onChange={(e) => setNoteText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+              e.preventDefault();
+              submitNote();
+            }
+          }}
+        />
+        <div className="history-add-footer">
+          <span className="history-char-count">{noteText.length}/300자</span>
+          <button className="btn btn-primary" disabled={saving || !noteText.trim()} onClick={submitNote}>
+            {saving ? '저장 중...' : '메모 추가'}
+          </button>
+        </div>
+      </div>
+      <div className="history-feed">
+        {notes.length === 0 ? (
+          <div className="history-empty">등록된 메모가 없습니다.</div>
+        ) : (
+          notes.map((n, i) => (
+            <div className="history-note" key={i}>
+              <div className="history-note-meta">
+                {n.author && <span className="history-note-author">{n.author}</span>}
+                {n.timestamp && <span className="history-note-time">{formatRelativeTime(n.timestamp)}</span>}
+              </div>
+              <div className="history-note-text">{n.text}</div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TypeCell({ active, type }) {
   if (!active) {
-    return (
-      <td style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 12 }}>N</td>
-    );
+    return <td style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 12 }}>N</td>;
   }
   return (
     <td style={{ textAlign: 'center' }}>
       <span style={{
-        display: 'inline-block',
-        padding: '1px 8px',
-        borderRadius: 10,
-        fontSize: 11,
-        fontWeight: 700,
+        display: 'inline-block', padding: '1px 8px', borderRadius: 10, fontSize: 11, fontWeight: 700,
         border: TYPE_TAG_STYLE[type].border,
         background: TYPE_TAG_STYLE[type].background,
         color: TYPE_TAG_STYLE[type].color,
