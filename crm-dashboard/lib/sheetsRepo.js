@@ -40,6 +40,8 @@ const ACCOUNT_COLUMNS = {
 // 상단 공지사항은 새 탭을 만들지 않고 "계정관리" 탭의 사용하지 않는 셀(J1)에 텍스트 한 줄로 저장합니다.
 const ANNOUNCEMENT_CELL = 'J1';
 const ANNOUNCEMENT_MAX_LENGTH = 50;
+const RETENTION_NOTICE_CELL = 'AA1';
+const RETENTION_NOTICE_MAX_LENGTH = 300;
 
 // 같은 서버 인스턴스에서 너무 자주 구글 API를 호출하지 않도록 짧게 캐시합니다.
 const CACHE_TTL_MS = 2 * 60 * 1000; // 2분 — Google Sheets API 호출 빈도 제한
@@ -53,6 +55,7 @@ const linkHubCache = new Map(); // refSheet key -> { expires, data }
 let renewalCache = null; // { expires, data }
 let accountsCache = null; // { expires, accounts }
 let announcementCache = null; // { expires, text }
+let retentionNoticeCache = null; // { expires, text }
 let performanceCache = null; // { expires, data }
 // 병합·정렬·ETag까지 마친 최종 결과 캐시. 캐시 HIT 시 이 세 연산을 전부 건너뜁니다.
 let adminResultCache = null;     // { expires, sheetTitle, columnMap, rows, etag }
@@ -945,6 +948,40 @@ async function saveAnnouncement(text, actor) {
   return trimmedText;
 }
 
+// 리텐션 페이지 전용 공지: "계정관리" 탭의 K1 셀에 저장합니다.
+async function readRetentionNotice({ useCache = true } = {}) {
+  if (useCache && retentionNoticeCache && retentionNoticeCache.expires > Date.now()) {
+    return retentionNoticeCache.text;
+  }
+  const sheets = getSheetsClient();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: ADMIN_SPREADSHEET_ID,
+    range: `${quoteSheetTitle(ACCOUNTS_SHEET_TITLE)}!${RETENTION_NOTICE_CELL}`,
+  });
+  const text = ((res.data.values && res.data.values[0] && res.data.values[0][0]) || '').trim();
+  retentionNoticeCache = { expires: Date.now() + CACHE_TTL_MS, text };
+  return text;
+}
+
+async function saveRetentionNotice(text, actor) {
+  if (!actor || actor.role !== '관리자') {
+    throw new Error('관리자만 공지를 수정할 수 있습니다.');
+  }
+  const trimmedText = (text || '').toString().trim();
+  if (trimmedText.length > RETENTION_NOTICE_MAX_LENGTH) {
+    throw new Error(`공지는 ${RETENTION_NOTICE_MAX_LENGTH}자 이내로 입력해주세요.`);
+  }
+  const sheets = getSheetsClient();
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: ADMIN_SPREADSHEET_ID,
+    range: `${quoteSheetTitle(ACCOUNTS_SHEET_TITLE)}!${RETENTION_NOTICE_CELL}`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [[trimmedText]] },
+  });
+  retentionNoticeCache = { expires: Date.now() + CACHE_TTL_MS, text: trimmedText };
+  return trimmedText;
+}
+
 async function findAccountByLoginId(loginId, opts) {
   const accounts = await getAccountsConfig(opts);
   return accounts.find((a) => a.loginId === loginId) || null;
@@ -1385,6 +1422,8 @@ module.exports = {
   deleteInsurerLink,
   readAnnouncement,
   saveAnnouncement,
+  readRetentionNotice,
+  saveRetentionNotice,
   readPerformanceDashboard,
   backfillRegisteredAt,
   readKamasterLoginStatus,

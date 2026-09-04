@@ -191,6 +191,8 @@ export default function RetentionPage({ role, name }) {
           </div>
         </div>
 
+        <RetentionNotice isAdmin={isAdmin} />
+
         {/* 유형 설명 카드 */}
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
           {(['type1', 'type2', 'type3', 'type4']).map((t) => (
@@ -565,6 +567,97 @@ function ContactHistoryPanel({ row, focusNote, onUpdated }) {
           ))
         )}
       </div>
+    </div>
+  );
+}
+
+function RetentionNotice({ isAdmin }) {
+  const [text, setText] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/retention-notice')
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled && d.ok) setText(d.text || ''); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  function startEdit() { setDraft(text); setError(''); setEditing(true); }
+  function cancelEdit() { setEditing(false); setError(''); }
+
+  async function save() {
+    setSaving(true); setError('');
+    try {
+      const res = await fetch('/api/retention-notice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: draft.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '저장 실패');
+      setText(data.text || '');
+      setEditing(false);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!text && !isAdmin) return null;
+
+  if (editing) {
+    return (
+      <div style={{
+        background: '#EFF6FF', border: '1px solid #93C5FD', borderRadius: 10,
+        padding: '12px 16px', marginBottom: 16,
+      }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#1E40AF', marginBottom: 8 }}>📌 리텐션 공지 편집</div>
+        <textarea
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          maxLength={300}
+          placeholder="매니저에게 전달할 공지 내용을 입력하세요 (300자 이내)"
+          style={{
+            width: '100%', minHeight: 80, resize: 'vertical', fontSize: 13,
+            border: '1px solid #93C5FD', borderRadius: 6, padding: '8px 10px',
+            background: '#F8FBFF', boxSizing: 'border-box',
+          }}
+        />
+        {error && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 4 }}>{error}</div>}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8, alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>{draft.length}/300자</span>
+          <button className="btn" onClick={cancelEdit} disabled={saving}>취소</button>
+          <button className="btn btn-primary" onClick={save} disabled={saving}>
+            {saving ? '저장 중...' : '저장'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        background: '#EFF6FF', border: '1px solid #93C5FD', borderRadius: 10,
+        padding: '12px 16px', marginBottom: 16,
+        cursor: isAdmin ? 'pointer' : 'default',
+        display: 'flex', gap: 10, alignItems: 'flex-start',
+      }}
+      onClick={isAdmin ? startEdit : undefined}
+      title={isAdmin ? '클릭하여 편집' : undefined}
+    >
+      <span style={{ fontSize: 16, flexShrink: 0 }}>📌</span>
+      <span style={{ fontSize: 13, color: '#1E40AF', whiteSpace: 'pre-wrap', lineHeight: 1.6, flex: 1 }}>
+        {text || (isAdmin ? '공지를 입력하려면 클릭하세요' : '')}
+      </span>
+      {isAdmin && <span style={{ fontSize: 11, color: '#93C5FD', flexShrink: 0, alignSelf: 'center' }}>편집</span>}
     </div>
   );
 }
