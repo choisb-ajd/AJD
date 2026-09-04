@@ -40,7 +40,7 @@ const ACCOUNT_COLUMNS = {
 // 상단 공지사항은 새 탭을 만들지 않고 "계정관리" 탭의 사용하지 않는 셀(J1)에 텍스트 한 줄로 저장합니다.
 const ANNOUNCEMENT_CELL = 'J1';
 const ANNOUNCEMENT_MAX_LENGTH = 50;
-const RETENTION_NOTICE_CELL = 'AA1';
+const RETENTION_NOTICE_CELL = 'Z1';
 const RETENTION_NOTICE_MAX_LENGTH = 300;
 
 // 같은 서버 인스턴스에서 너무 자주 구글 API를 호출하지 않도록 짧게 캐시합니다.
