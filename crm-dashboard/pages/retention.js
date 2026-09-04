@@ -61,19 +61,16 @@ const TYPE_TAG_STYLE = {
 
 const RETENTION_KEY = 'retention-v1';
 
-function formatRelativeTime(timestamp) {
+function formatTimestamp(timestamp) {
   if (!timestamp) return '';
-  const ts = Date.parse(timestamp.replace(' ', 'T'));
-  if (!ts) return timestamp;
-  const diffMs = Date.now() - ts;
-  const min = Math.floor(diffMs / 60000);
-  if (min < 1) return '방금 전';
-  if (min < 60) return `${min}분 전`;
-  const hour = Math.floor(min / 60);
-  if (hour < 24) return `${hour}시간 전`;
-  const day = Math.floor(hour / 24);
-  if (day < 7) return `${day}일 전`;
-  return timestamp.slice(0, 10);
+  const d = new Date(timestamp.replace(' ', 'T'));
+  if (isNaN(d.getTime())) return timestamp;
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const h = String(d.getHours()).padStart(2, '0');
+  const m = String(d.getMinutes()).padStart(2, '0');
+  return `${y}.${mo}.${day} ${h}:${m}`;
 }
 
 export default function RetentionPage({ role, name }) {
@@ -476,7 +473,7 @@ function ContactHistoryPanel({ row, focusNote, onUpdated }) {
               <div className="history-note-meta">
                 {n.author && <span className="history-note-author">{n.author}</span>}
                 <span className="history-note-time">
-                  {n.timestamp ? formatRelativeTime(n.timestamp) : '시간 미기록'}
+                  {n.timestamp ? formatTimestamp(n.timestamp) : '시간 미기록'}
                 </span>
               </div>
               <div className="history-note-text">{n.text}</div>
