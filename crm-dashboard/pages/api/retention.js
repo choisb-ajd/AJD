@@ -20,7 +20,7 @@ export default async function handler(req, res) {
       readKamasterLoginStatus({ useCache: !force }),
     ]);
 
-    const rows = admin.rows.map((r) => {
+    const allRows = admin.rows.map((r) => {
       const phone = normalizePhone(r.values.phone || '');
       // loginStatusMap: phone → true(정회원) / false(준회원) / undefined(not in kamaster)
       const inKamaster = loginStatusMap.has(phone);
@@ -28,6 +28,10 @@ export default async function handler(req, res) {
       const isAssocMember = inKamaster && hasLoginId === false;
       return { ...r.values, isAssocMember };
     });
+
+    const rows = session.role === '관리자'
+      ? allRows
+      : allRows.filter((r) => (r.manager || '') === session.name);
 
     res.setHeader('Cache-Control', 'no-cache');
     return res.status(200).json({ ok: true, rows });
